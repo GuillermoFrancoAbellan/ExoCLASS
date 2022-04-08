@@ -14,6 +14,7 @@ Also contains derived classes
 
 * :class:`annihilating_model <DarkAges.model.annihilating_model>`
 * :class:`annihilating_halos_model <DarkAges.model.annihilating_halos_model>`
+* :class:`annihilating_UCMHs_model <DarkAges.model.annihilating_UCMHs_model>`
 * :class:`decaying_model <DarkAges.model.decaying_model>`
 * :class:`evaporating_model <DarkAges.model.evaporating_model>`
 * :class:`accreting_model <DarkAges.model.accreting_model>`
@@ -214,13 +215,51 @@ class annihilating_halos_model(model):
 			normalization = np.ones_like(redshift)*(2*m)
 		else:
 			raise DarkAgesError('I did not understand your input of "normalize_spectrum_by" ( = {:s}). Please choose either "mass" or "energy_integral"'.format(norm_by))
-		normalization /= boost_factor_halos(redshift,zh,fh)
+		normalization *= boost_factor_halos(redshift,zh,fh)
 
 		spec_electrons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_el_spec[:,None],zh,fh)
 		spec_photons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_ph_spec[:,None],zh,fh)
 
 		model.__init__(self, spec_electrons, spec_photons, normalization, logEnergies,3)
 
+
+class annihilating_UCMHs_model(model):
+	def __init__(self,ref_el_spec,ref_ph_spec,ref_oth_spec,m,logEnergies=None,redshift=None, **DarkOptions):
+
+		from .special_functions import boost_factor_UCMHs
+
+		def scaling_boost_factor(redshift,spec_point):
+			ret = spec_point*boost_factor_UCMHs(redshift)
+			return ret
+
+		if logEnergies is None:
+			logEnergies = get_logEnergies()
+		if redshift is None:
+			redshift = get_redshift()
+
+		tot_spec = ref_el_spec + ref_ph_spec + ref_oth_spec
+#		a_file = open("Boost_dark_ages.txt", "w")
+#		np.savetxt(a_file, boost_factor_UCMHs(redshift))
+#		a_file.close()
+
+		norm_by = DarkOptions.get('normalize_spectrum_by','energy_integral')
+		if norm_by == 'energy_integral':
+			from .common import trapz, logConversion
+			E = logConversion(logEnergies)
+			if len(E) > 1:
+				normalization = trapz(tot_spec*E**2*np.log(10), logEnergies)*np.ones_like(redshift)
+			else:
+				normalization = (tot_spec*E)[0]
+		elif norm_by == 'mass':
+			normalization = np.ones_like(redshift)*(2*m)
+		else:
+			raise DarkAgesError('I did not understand your input of "normalize_spectrum_by" ( = {:s}). Please choose either "mass" or "energy_integral"'.format(norm_by))
+		normalization *= boost_factor_UCMHs(redshift)
+
+		spec_electrons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_el_spec[:,None])
+		spec_photons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_ph_spec[:,None])
+
+		model.__init__(self, spec_electrons, spec_photons, normalization, logEnergies,3)
 
 class decaying_model(model):
 	u"""Derived instance of the class :class:`model <DarkAges.model.model>` for the case of a decaying

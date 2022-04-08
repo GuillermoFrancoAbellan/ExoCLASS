@@ -60,6 +60,7 @@ enum PBH_accretion_recipe {
   spherical_accretion, /**< Accretion recipe from Ali_Haimoud & Kamionkowski, arXiv:1612.05644 */
   disk_accretion  /**< ADAF accretion recipe from Xie and Yuan 2012, following Poulin et al 1707.04206 */
 };
+
 enum energy_deposition_function {
   No_deposition, /**< No energy deposition is considered. Useful for pedagogic illustration. */
   Analytical_approximation, /**< Analytical energy deposition treatment, introduced in 1209.0247 and corrected in 1612.05644 */
@@ -222,6 +223,39 @@ double * reio_inter_xe; /**< discrete \f$ X_e(z)\f$ values */
   double chi_lowE;
   int annihil_coef_num_lines;
 
+  // GFA, required for extended PBH mass function
+  short has_extended_PBH_MassFunc; // do we want to consider an extended mass function?
+  int num_PBH_accreting_mass; // total number of accreting mass considered
+  double log10_Mcut_PBH;      // parameter describing the cut-off in the extended mass function
+  double * table_PBH_accreting_mass; // array containing the different masses
+  double * table_PBH_MassFunc;      // array containing the mass function evaluated at the different masses
+  double PBH_fraction_LIGO; //fraction of PBH as CDM in the mass range observed by LIGO (between 5 and 160 Msun)
+
+  // these coefficients are now matrices with [index_mass][index_redshift]
+  double ** annihil_coef_xe_at_mass;
+  double ** annihil_coef_heat_at_mass;
+  double ** annihil_coef_lya_at_mass;
+  double ** annihil_coef_ionH_at_mass;
+  double ** annihil_coef_ionHe_at_mass;
+  double ** annihil_coef_lowE_at_mass;
+  double ** annihil_coef_dd_heat_at_mass;
+  double ** annihil_coef_dd_lya_at_mass;
+  double ** annihil_coef_dd_ionH_at_mass;
+  double ** annihil_coef_dd_ionHe_at_mass;
+  double ** annihil_coef_dd_lowE_at_mass;
+
+  // result of interpotation at each redshift, these are now vectors [index_M]
+  double * chi_heat_at_mass;
+  double * chi_lya_at_mass;
+  double * chi_ionH_at_mass;
+  double * chi_ionHe_at_mass;
+  double * chi_lowE_at_mass;
+  int * annihil_coef_num_lines_at_mass; // number of lines (i.e. redshifts) per each mass
+
+  double * ener_rate_dep_ion_per_mass;
+  double * ener_rate_dep_lya_per_mass;
+  double * ener_rate_dep_heat_per_mass;
+
   /**
   * For DM annihilation & decay.
   * Note that the DM lifetime is defined in the background module
@@ -255,6 +289,18 @@ double * reio_inter_xe; /**< discrete \f$ X_e(z)\f$ values */
   double annihilation_f_halo; /** takes the contribution of DM annihilation in halos into account*/
   double annihilation_z_halo; /** characteristic redshift for DM annihilation in halos*/
   double f_eff; /** effective on the spot parameter */
+
+  short has_UCMH_spike; /**< flag to specify if we want to consider a spike in the primordial spectrum, leading to the formation of  UCMHs**/
+  double A_spike; //amplitude of the spike
+  double k_spike; //location of the spike
+  double f_2;     // Given from a fit to N-body simulations by by Delos et al.
+  double Delta_c; //characteristic overdensity of halos at collapse
+  double Mass_min; //minimal halo mass in units of M_sol, dependent of the WIMP model
+
+  double A_s;
+  double n_s;
+  double k_pivot;
+  int Number_z;
 
   double decay_fraction; /** parameter describing CDM decay (f/tau, see e.g. 1109.6322)*/
 
@@ -314,6 +360,9 @@ double * reio_inter_xe; /**< discrete \f$ X_e(z)\f$ values */
   int tt_size; /**< number of lines (redshift steps) in the tables */
   double * z_table; /**< vector z_table[index_z] with values of redshift (vector of size tt_size) */
   double * thermodynamics_table; /**< table thermodynamics_table[index_z*pth->tt_size+pba->index_th] with all other quantities (array of size th_size*tt_size) */
+  // GFA, variables required for computing the vectors Boost vs. z and storing them in a table
+  double * z_table_for_boost;
+  double * boost_table;
 
   //@}
 
@@ -491,6 +540,9 @@ struct recombination {
 
   double decay_fraction; /**< parameter describing CDM decay (f/tau, see e.g. 1109.6322)*/
   double PBH_accreting_mass; /**< mass from the PBH, in case of Dark Matter being PBH */
+  double * table_PBH_accreting_mass; // GFA
+  double * energy_rate_at_mass; //GFA
+  int num_PBH_accreting_mass;   //GFA
   double PBH_ADAF_delta; /**<Specific to ADAF_Simulation accretion recipe. Determines the heating of the electrons in the disk, influencing the emissivity. Can be set to 0.5 (aggressive scenario) or 1e-3 (conservative). From Fie and Yuan 2012. */
   double PBH_accretion_eigenvalue; /**< The eigenvalue of the accretion rate. It rescales the perfect Bondi case. (see e.g. Ali-Haimoud & Kamionkowski 2016) */
   double PBH_relative_velocities; /**< The relative velocities between PBH and baryons in km/s. If negative, the linear result is chosen by the code. */
@@ -537,7 +589,10 @@ struct recombination {
 
   double annihilation_f_halo; /**< takes the contribution of DM annihilation in halos into account*/
   double annihilation_z_halo; /**< characteristic redshift for DM annihilation in halos*/
-
+  // GFA
+  short has_UCMH_spike; /**< flag to specify if we want to consider a spike in the primordial spectrum, leading to the formation of  UCMHs**/
+  double * z_table_for_boost;
+  double * boost_table;
   //@}
   /** A few parameters useful if realistic energy deposition is required in case of annihilations in halos or energy injection due to decay of short lived DM */
   double * annihil_z;
@@ -713,12 +768,23 @@ extern "C" {
                                                     struct background * pba,
                                                     struct thermo * pth
                                                   );
+  int thermodynamics_annihilation_coefficients_init_PBH_MF(
+                                                           struct precision * ppr,
+                                                           struct background * pba,
+                                                           struct thermo * pth
+                                                         ); // GFA
   int thermodynamics_annihilation_coefficients_interpolate(
                                                      struct precision * ppr,
                                                      struct background * pba,
                                                      struct thermo * pth,
                                                      double xe
                                                    );
+  int thermodynamics_annihilation_coefficients_interpolate_PBH_MF(
+                                                                  struct precision * ppr,
+                                                                  struct background * pba,
+                                                                  struct thermo * pth,
+                                                                  double xe
+                                                                 ); // GFA
   int thermodynamics_annihilation_coefficients_free(
                                                    struct thermo * pth
                                                  );
@@ -764,6 +830,14 @@ extern "C" {
                                                     double * energy_rate,
                                                     ErrorMsg error_message
                                                   );
+
+  int thermodynamics_accreting_pbh_energy_injection_PBH_MF(
+                                                    struct precision * ppr,
+                                                    struct background * pba,
+                                                    struct recombination * preco,
+                                                    double z,
+                                                    ErrorMsg error_message
+                                                    );
 
   int PBH_evaporating_mass_time_evolution(
                                     struct precision * ppr,
@@ -897,6 +971,79 @@ extern "C" {
                           double after,
                           double width,
                           double * result);
+
+// GFA
+struct halos_workspace {
+       struct precision  * ppr;
+       struct background * pba;
+       struct thermo     * pth;
+       double R; /* comoving scale */
+       double z; /* redshift */
+       double c3_over_mu;
+       double sigma2_st;
+};
+
+int compute_boost_NFW_UCMH(struct precision * ppr, //GFA
+                             struct background * pba,
+                             struct thermo * pth);
+
+double T0_tilde(double k,
+                double alpha,
+                double beta,
+                struct background * pba);
+
+double G(double y);
+
+double T_Hu(double k,
+            struct background * pba);
+
+double integrand_for_sigma2(void * params,
+                            double k);
+
+double integrand_boost_high_mass(void * params,
+                                 double M);
+
+double f_NFW(double c);
+
+double c_NFW(double M,
+             void * params);
+
+double H_per_H0(double z,
+                struct background * pba);
+
+double zF_wo_spike(void * params,
+                   double M);
+
+double halo_function_high_mass(void * params,
+                               double M);
+
+double D_growth(double z,
+                struct background * pba);
+
+double c_UCMH(double M,
+              void * params);
+
+double g_UCMH(void * params,
+              double c);
+
+double g_UCMH_prime(void * params,
+                    double c);
+
+double zF_w_spike(void * params,
+                  double M);
+
+double f_UCMH(double c,
+              double M,
+              void * params);
+
+double tH0(double z,
+           struct background * pba);
+
+double integrand_boost_low_mass(void * params,
+                                double M);
+
+double halo_function_low_mass(void * params,
+                              double M);
 
 #ifdef __cplusplus
 }

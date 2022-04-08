@@ -49,7 +49,7 @@ import os
 import sys
 from .common import finalize, feff_finalize, sample_spectrum
 from .__init__ import transfer_functions, DarkAgesError, get_redshift, get_logEnergies, print_info, print_warning, channel_dict
-from .model import annihilating_model, decaying_model, evaporating_model, annihilating_halos_model, accreting_model
+from .model import annihilating_model, decaying_model, evaporating_model, annihilating_halos_model, annihilating_UCMHs_model , accreting_model #GFA
 from .interpolator import logInterpolator, NDlogInterpolator
 
 ##### Functions related to executing a script-like file
@@ -240,11 +240,11 @@ def loading_from_specfiles(fnames, transfer_functions, mass,  logEnergies=None, 
 	t_dec : :obj:`float`
 		Lifetime of the DM candidate for a decaying species (*in units of* :math:`\\mathrm{s}`)
 		Mandatory for :code:`hist='decay'` (Will be ignored for
-		:code:`hist='annihilation'` and :code:`hist='annihilation_halos'`.
+		:code:`hist='annihilation'` and :code:`hist='annihilation_halos'` and :code:`hist='annihilation_UCMHs'`.
 		In that case you can set it to infinity)
 	hist : :obj:`str`, *optional*
 		String with the energy injection history to consider. Valid options are:
-		:code:`'annihilation'`, :code:`hist='annihilation_halos'` and :code:`'decay'`.
+		:code:`'annihilation'`, :code:`hist='annihilation_halos'`, :code:`hist='annihilation_UCMHs'` and :code:`'decay'`.
 		If not given the default value :code:`hist='annihilation'` will be taken.
 	branchings : :obj:`array-like`
 		Array of the relative contributions of each of the spectra specified in
@@ -304,7 +304,7 @@ def loading_from_specfiles(fnames, transfer_functions, mass,  logEnergies=None, 
 		spectra = np.empty(shape=(3,1,len(fnames)), dtype=np.float64)
 		if hist == 'decay':
 			logEnergies = np.ones((1,))*np.log10(1e9*0.5*mass)
-		elif hist == 'annihilation' or hist =='annihilation_halos':
+		elif hist == 'annihilation' or hist =='annihilation_halos' or hist == 'annihilation_UCMHs': #GFA
 			logEnergies = np.ones((1,))*np.log10(1e9*mass)
 		else:
 			raise DarkAgesError('The \'dirac-mode\' is not compatible with the history "{:s}". I am so sorry.'.format(hist))
@@ -317,10 +317,13 @@ def loading_from_specfiles(fnames, transfer_functions, mass,  logEnergies=None, 
 				raise DarkAgesError('I could not interpret the spectrum-input >>{0}<< in combination with dirac-like injection spectra.'.format(fname))
 		tot_spec = np.tensordot(spectra, branchings, axes=(2,0))
 
+
 	if hist == 'decay':
 		model_from_file = decaying_model(tot_spec[0], tot_spec[1], tot_spec[2], 1e9*mass, t_dec,logEnergies,redshift, **DarkOptions)
 	elif hist == 'annihilation':
-		model_from_file = annihilating_model(tot_spec[0], tot_spec[1], tot_spec[2], 1e9*mass,logEnergies,redshift, **DarkOptions)
+		model_from_file = annihilating_model(tot_spec[0], tot_spec[1], tot_spec[2], 1e9*mass,logEnergies,redshift, **DarkOptions) 
+	elif hist == 'annihilation_UCMHs':
+		model_from_file = annihilating_UCMHs_model(tot_spec[0], tot_spec[1], tot_spec[2], 1e9*mass,logEnergies,redshift, **DarkOptions)         
 	elif hist == 'annihilation_halos':
 		model_from_file = annihilating_halos_model(tot_spec[0], tot_spec[1], tot_spec[2], 1e9*mass,zh,fh,logEnergies,redshift, **DarkOptions)
 	else:

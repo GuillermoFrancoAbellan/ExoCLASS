@@ -18,6 +18,11 @@ typedef struct {
   double ann_z, ann_zmax, ann_zmin, ann_var; /* Parameters for the variation of pann(z) */
   double ann_z_halo;                         /* Characteristic redshift for annihilation in haloes */
   double ann_f_halo;                         /* takes the contribution of DM annihilation in halos into account*/
+  // GFA
+  double has_UCMH_spike;
+  int Number_z;
+  double * z_table_for_boost;
+  double * boost_table;
 
   double Mpbh, fpbh;           /* Mass and fraction of DM made of primordial black holes */
   int coll_ion;                /* If 1: assume gas gest collisionally ionized.

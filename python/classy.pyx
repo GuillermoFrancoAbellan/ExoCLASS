@@ -1009,6 +1009,9 @@ cdef class Class:
     def tau_reio(self):
         return self.th.tau_reio
 
+    def PBH_fraction_LIGO(self):
+        return self.th.PBH_fraction_LIGO
+
     # Defined twice ?
     def Omega_m(self):
         return self.ba.Omega0_b+self.ba.Omega0_cdm+self.ba.Omega0_ncdm_tot + self.ba.Omega0_dcdm
@@ -1595,6 +1598,8 @@ cdef class Class:
                          self.ba.Omega0_ncdm_tot + self.ba.Omega0_dcdm)/self.ba.h**2
             elif name == 'tau_reio':
                 value = self.th.tau_reio
+            elif name == 'PBH_fraction_LIGO':
+                value = self.th.PBH_fraction_LIGO
             elif name == 'z_reio':
                 value = self.th.z_reio
             elif name == 'z_10_percent':

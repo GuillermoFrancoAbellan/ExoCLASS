@@ -261,6 +261,13 @@ int array_integrate_all_trapzd_or_spline(
 			       int result_size, /** from 1 to n_columns */
 			       ErrorMsg errmsg);
 
+// GFA
+  double array_interpolate_linear_simpler(
+             double * x_array,
+             int n_lines,
+             double * array,
+             double x);
+
   int array_interpolate_growing_closeby(
 					double * array,
 					int n_columns,

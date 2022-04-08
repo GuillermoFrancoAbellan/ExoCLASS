@@ -29,7 +29,7 @@ cdef extern from "class.h":
 
     cdef struct precision:
         ErrorMsg error_message
-		
+
     cdef struct background:
         ErrorMsg error_message
         int bg_size
@@ -89,7 +89,8 @@ cdef extern from "class.h":
         double rs_d
         double YHe
         double n_e
-		
+        double PBH_fraction_LIGO
+
         int tt_size
 
     cdef struct perturbs:

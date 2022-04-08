@@ -562,6 +562,9 @@ extern "C" {
 /* remark: sigma_B = 2 pi^5 k_B^4 / (15h^3c^2) = 5.670400e-8
                    = Stefan-Boltzmann constant in W/m^2/K^4 = Kg/K^4/s^3 */
 
+//GFA
+#define _delta_crit_ 1.6864702
+
 //@}
 
 /**

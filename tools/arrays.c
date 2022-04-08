@@ -1843,6 +1843,66 @@ int array_interpolate_linear(
 }
 
 
+// GFA
+double array_interpolate_linear_simpler(
+			     double * x_array,
+			     int n_lines,
+			     double * array,
+			     double x) {
+
+  int inf,sup,mid;
+  double h,a,b;
+
+  inf=0;
+  sup=n_lines-1;
+
+  if (x_array[inf] < x_array[sup]){
+
+   if (x < x_array[inf]) {
+      printf("ERROR: %s(L:%d) : x=%e < x_min=%e \n",__func__,__LINE__,x,x_array[inf]);
+			exit(EXIT_FAILURE);
+    }
+
+    if (x > x_array[sup]) {
+      printf("ERROR: %s(L:%d) : x=%e > x_max=%e \n",__func__,__LINE__,x,x_array[sup]);
+			exit(EXIT_FAILURE);
+    }
+
+    while (sup-inf > 1) {
+      mid=(int)(0.5*(inf+sup));
+      if (x < x_array[mid]) {sup=mid;}
+      else {inf=mid;}
+    }
+
+  }
+
+  else {
+
+    if (x < x_array[sup]) {
+      printf("ERROR: %s(L:%d) : x=%e < x_min=%e \n",__func__,__LINE__,x,x_array[sup]);
+      exit(EXIT_FAILURE);
+    }
+
+    if (x > x_array[inf]) {
+      printf("ERROR: %s(L:%d) : x=%e > x_max=%e \n",__func__,__LINE__,x,x_array[inf]);
+      exit(EXIT_FAILURE);
+    }
+
+    while (sup-inf > 1) {
+      mid=(int)(0.5*(inf+sup));
+      if (x > x_array[mid]) {sup=mid;}
+      else {inf=mid;}
+    }
+
+  }
+
+  h = x_array[sup] - x_array[inf];
+  b = (x-x_array[inf])/h;
+  a = 1-b;
+  return a * *(array+inf) + b * *(array+sup);
+}
+
+
 /**
  * interpolate to get y_i(x), when x and y_i are in different arrays
  *

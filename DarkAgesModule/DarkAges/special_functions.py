@@ -5,6 +5,7 @@ import os
 import sys
 import dill
 from scipy.special import erf
+from scipy.interpolate import interp1d
 
 from .__init__ import DarkAgesError as err
 data_dir = os.path.join( os.path.dirname(os.path.realpath( __file__ )), 'data' )
@@ -12,6 +13,17 @@ data_dir = os.path.join( os.path.dirname(os.path.realpath( __file__ )), 'data' )
 def boost_factor_halos(redshift,zh,fh):
 	ret = 1 + fh*erf(redshift/(1+zh))/redshift**3
 	return ret
+
+# GFA
+def boost_factor_UCMHs(redshift):
+    file_boost = [os.path.join( os.path.dirname(os.path.realpath( __file__ )), '../../Boost_vs_z.txt' )]
+    data = []
+    for data_file in file_boost:
+        data.append(np.loadtxt(data_file))
+    boost = data[0]
+    boost_at_z = interp1d(boost[:,0], boost[:,1])
+    ret = boost_at_z(redshift)
+    return ret
 
 def secondaries_from_cirelli(logEnergies,mass,primary, **DarkOptions):
 	from .common import sample_spectrum

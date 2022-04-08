@@ -431,11 +431,14 @@ struct precision
   /* - for bbn */
 /* @cond INCLUDE_WITH_DOXYGEN */
   FileName sBBN_file;
+  FileName boost_file; //GFA
 
   /* - For Energy injection from DM annihilations or decays */
 
   FileName energy_injec_coeff_file;
+  FileName PBH_MF_file; // GFA
   FileName energy_injec_f_eff_file;
+
 
 /* @endcond */
 
@@ -502,6 +505,16 @@ struct precision
   FileName hyrec_R_inf_file;
   FileName hyrec_two_photon_tables_file;
 /* @endcond */
+
+// GFA, relevant precision parameters for the calculation of the boost DM annihilation factor in the UCMH+NFW scenario
+  double Mass_max; //in units of M_sol
+  double k_min;    //in units of Mpc^{-1}
+  double z_min;
+  double z_max;
+  int Number_k;
+  int Number_M;
+  int Number_z;
+
   /* - for reionization */
 
   double reionization_z_start_max; /**< maximum redshift at which reionization should start. If not, return an error. */

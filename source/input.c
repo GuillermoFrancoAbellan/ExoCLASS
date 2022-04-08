@@ -5,6 +5,7 @@
  */
 
 #include "input.h"
+#include "integration_routines_2.h" // GFA
 
 /**
  * Use this routine to extract initial parameters from files 'xxx.ini'
@@ -537,8 +538,13 @@ int input_read_parameters(
   double c_cor=0.;
 
   double Omega_tot;
+  FILE * file_PBH_MF; //GFA
+  char line[_LINE_LENGTH_MAX_];
+  int num_lines=0, c, array_line=0, index_M, i;
+  int index_Mmin_LIGO, index_Mmax_LIGO;
+  double * table_PBH_acc_mass;
+  double * table_PBH_mass_func;
 
-  int i;
 
   double sigma_B; /* Stefan-Boltzmann constant in \f$ W/m^2/K^4 = Kg/K^4/s^3 \f$*/
 
@@ -1409,16 +1415,219 @@ int input_read_parameters(
   class_read_double("annihilation_cross_section",pth->annihilation_cross_section);
   class_read_double("DM_mass",pth->DM_mass);
   class_test(pth->DM_mass <=0 && pth->annihilation_cross_section >0,errmsg,"you have annihilation_cross_section > 0 but DM_mass = 0. That is weird, please check your param file and set 'DM_mass' [GeV] to a non-zero value.\n");
+  // GFA
+  class_call(parser_read_string(pfc,"has_UCMH_spike",&(string1),&(flag1),errmsg),errmsg,errmsg);
+  if (flag1 == _TRUE_) {
+  if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+    pth->has_UCMH_spike = _TRUE_;
+  }
+  else {
+    if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+      pth->has_UCMH_spike = _FALSE_;
+    }
+    else {
+      class_stop(errmsg,"incomprehensible input '%s' for the field 'has_UCMH_spike'",string1);
+    }
+   }
+  }
+
+  if (pth->has_UCMH_spike == _TRUE_) {
+    class_call(parser_read_double(pfc,"A_spike",&param1,&flag1,errmsg),
+           errmsg,
+           errmsg);
+    class_call(parser_read_double(pfc,"Log10_A_spike",&param2,&flag2,errmsg),
+           errmsg,
+           errmsg);
+    class_test((flag1 == _TRUE_) && (flag2 == _TRUE_),
+           errmsg,
+           "In input file, you cannot enter both A_spike and Log10_A_spike, choose one");
+    if (flag1 == _TRUE_)
+      pth->A_spike = param1;
+    else if (flag2 == _TRUE_)
+      pth->A_spike = pow(10,param2);
+
+    class_call(parser_read_double(pfc,"k_spike",&param1,&flag1,errmsg),
+            errmsg,
+            errmsg);
+    class_call(parser_read_double(pfc,"Log10_k_spike",&param2,&flag2,errmsg),
+            errmsg,
+            errmsg);
+    class_test((flag1 == _TRUE_) && (flag2 == _TRUE_),
+            errmsg,
+            "In input file, you cannot enter both k_spike and Log10_k_spike, choose one");
+    if (flag1 == _TRUE_)
+      pth->k_spike = param1;
+    else if (flag2 == _TRUE_)
+      pth->k_spike = pow(10,param2);
+
+    class_read_double("f_2",pth->f_2);
+    class_read_double("Delta_c",pth->Delta_c);
+    class_read_double("Mass_min",pth->Mass_min);
+  }
+
+  //GFA, do we want to consider an extended PBH mass function ?
+  class_call(parser_read_string(pfc,"has_extended_PBH_MassFunc",&(string1),&(flag1),errmsg),errmsg,errmsg);
+  if (flag1 == _TRUE_) {
+  if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+    pth->has_extended_PBH_MassFunc = _TRUE_;
+  }
+  else {
+    if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+      pth->has_extended_PBH_MassFunc = _FALSE_;
+    }
+    else {
+      class_stop(errmsg,"incomprehensible input '%s' for the field 'has_extended_PBH_MassFunc'",string1);
+    }
+   }
+  }
+
+  if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+
+    class_read_double("log10_Mcut_PBH",pth->log10_Mcut_PBH);
+    class_test(pth->log10_Mcut_PBH != 2 && pth->log10_Mcut_PBH != 2.5  && pth->log10_Mcut_PBH != 3 && pth->log10_Mcut_PBH != 3.5 && pth->log10_Mcut_PBH != 4. && pth->log10_Mcut_PBH != 4.5 ,errmsg,
+      "The parameter 'pth->log10_Mcut_PBH' can currently only be set to 2, 2.5, 3, 3.5, 4 or 4.5.");
+
+    sprintf(ppr->PBH_MF_file,__CLASSDIR__); //GFA
+    //select datafile according to the value of Mcut
+    // If we want to use the datafiles with more bins, change _fewbins to _morebins in the name of the folder
+    if (pth->log10_Mcut_PBH == 2) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e2_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 2.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e2p5_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 3) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e3_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 3.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e3p5_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 4) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e4_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 4.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_morebins/Mcut10e4p5_b.txt");
+    }
+
+    // get number of lines
+    class_open(file_PBH_MF,ppr->PBH_MF_file, "r",pth->error_message);
+    for (c = getc(file_PBH_MF); c != EOF; c = getc(file_PBH_MF)) {if (c == '\n') {
+      num_lines = num_lines + 1;
+     }
+    }
+    fclose(file_PBH_MF);
+    class_open(file_PBH_MF,ppr->PBH_MF_file, "r",pth->error_message);
+     //allocate variables with that number of lines
+    pth->num_PBH_accreting_mass = num_lines;
+    class_alloc(pth->table_PBH_accreting_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->table_PBH_MassFunc,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->chi_heat_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->chi_lya_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->chi_ionH_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->chi_ionHe_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->chi_lowE_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->annihil_coef_num_lines_at_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->ener_rate_dep_ion_per_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->ener_rate_dep_lya_per_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(pth->ener_rate_dep_heat_per_mass,num_lines*sizeof(double),pth->error_message);
+    //store variables
+    while (fgets(line,_LINE_LENGTH_MAX_-1,file_PBH_MF) != NULL) {
+      class_test(sscanf(line,"%lg %lg ",
+                        &(pth->table_PBH_accreting_mass[array_line]),
+                        &(pth->table_PBH_MassFunc[array_line])) != 2,
+                  pth->error_message,
+                  "could not read value of parameters coeeficients in file %s\n",ppr->PBH_MF_file);
+      array_line ++;
+    }
+
+   fclose(file_PBH_MF);
+  }
+
 
   class_read_double("decay_fraction",pth->decay_fraction);
   class_test(pth->annihilation_cross_section <=0 && pth->DM_mass >0 && pth->annihilation <= 0 && pth->decay_fraction <=0,errmsg,"you have DM_mass > 0 but 'annihilation_cross_section', 'annihilation', 'decay_fraction' are zero. That is weird, please check your param file and set either 'annihilation_cross_section' [cm^3/s], 'annihilation' [m^3/(kg s)] or 'decay_fraction' to a non-zero value.\n");
   class_test(pba->tau_dcdm <=0 && pth->decay_fraction >0,errmsg,"you have decay_fraction > 0 but Gamma_dcdm = 0. That is weird, please check your param file and set 'tau_dcdm' [s] or 'Gamma_dcdm' [km/s/Mpc] to a non-zero value.\n");
   class_test(pba->tau_dcdm >0 && pth->decay_fraction <=0,errmsg,"you have decay_fraction = 0 but tau_dcdm > 0. That is weird, please check your param file.\n");
-  class_read_double("PBH_accreting_mass",pth->PBH_accreting_mass);
   class_read_double("PBH_evaporating_mass",pth->PBH_evaporating_mass);
+  class_read_double("PBH_accreting_mass",pth->PBH_accreting_mass);
   class_read_double("PBH_fraction",pth->PBH_fraction);
 
-  if(pth->PBH_accreting_mass>0. && pth->PBH_fraction>0){
+if (_FALSE_) {
+  if (pth->has_extended_PBH_MassFunc == _TRUE_) {  // GFA, compute f_LIGO here
+    //since we're doing the integral on a restricted mass interval, read files with a higher number of mass bins
+    sprintf(ppr->PBH_MF_file,__CLASSDIR__);
+    if (pth->log10_Mcut_PBH == 2) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e2_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 2.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e2p5_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 3) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e3_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 3.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e3p5_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 4) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e4_b.txt");
+    }
+    else if (pth->log10_Mcut_PBH == 4.5) {
+      strcat(ppr->PBH_MF_file,"/PBH_mass_function_manybins/Mcut10e4p5_b.txt");
+    }
+    // get number of lines
+    class_open(file_PBH_MF,ppr->PBH_MF_file, "r",pth->error_message);
+    num_lines =0;
+    for (c = getc(file_PBH_MF); c != EOF; c = getc(file_PBH_MF)) {if (c == '\n') {
+      num_lines = num_lines + 1;
+     }
+    }
+    fclose(file_PBH_MF);
+    class_open(file_PBH_MF,ppr->PBH_MF_file, "r",pth->error_message);
+    //allocate variables with that number of lines
+    class_alloc(table_PBH_acc_mass,num_lines*sizeof(double),pth->error_message);
+    class_alloc(table_PBH_mass_func,num_lines*sizeof(double),pth->error_message);
+    //store variables
+    array_line = 0;
+    while (fgets(line,_LINE_LENGTH_MAX_-1,file_PBH_MF) != NULL) {
+      class_test(sscanf(line,"%lg %lg ",
+                        &(table_PBH_acc_mass[array_line]),
+                        &(table_PBH_mass_func[array_line])) != 2,
+                  pth->error_message,
+                  "could not read value of parameters coeeficients in file %s\n",ppr->PBH_MF_file);
+      array_line ++;
+    }
+    fclose(file_PBH_MF);
+
+    index_M = 0;
+    // get lower bound
+    while (table_PBH_acc_mass[index_M] < 5.0 ) {
+     index_Mmin_LIGO = index_M;
+     index_M++;
+    }
+    index_Mmin_LIGO = index_M;
+    // get upper bound
+    while (table_PBH_acc_mass[index_M] < 160.0 ) {
+     index_Mmax_LIGO = index_M;
+     index_M++;
+    }
+    //integral using Simpson's method for unequal intervals
+    pth->PBH_fraction_LIGO = integrate_simpson_nonuniform(table_PBH_acc_mass,
+                                                          table_PBH_mass_func,
+                                                          index_Mmin_LIGO,
+                                                          index_Mmax_LIGO-index_Mmin_LIGO+1);
+    pth->PBH_fraction_LIGO *= pth->PBH_fraction;
+    // still not fully sure if PBH_fraction_LIGO is computed with the accuracy is needed
+    printf("PBH_fraction_LIGO = %e\n", pth->PBH_fraction_LIGO);
+    free(table_PBH_acc_mass);
+    free(table_PBH_mass_func);
+  }
+}
+
+
+  class_test(pth->has_extended_PBH_MassFunc == _TRUE_ && pth->PBH_accreting_mass >0,errmsg,"you have selected an extended PBH mass function but also fixed an accreting mass. That is weird, please check your param file.\n"); //GFA
+
+
+  if((pth->PBH_accreting_mass>0. && pth->PBH_fraction>0) || (pth->has_extended_PBH_MassFunc == _TRUE_ && pth->PBH_fraction>0) ){
 
     class_call(parser_read_string(pfc,"PBH_accretion_recipe",&string1,&flag1,errmsg),
                errmsg,
@@ -1431,7 +1640,7 @@ int input_read_parameters(
         class_read_int("coll_ion_pbh",pth->coll_ion_pbh); //A parameter that can be specified to HyRec when computing the effect of spherical accreting PBH.
         flag2=_TRUE_;
       }
-      /** - spherical accretion following Poulin et al. 1707.04206 */
+      /** - disk accretion following Poulin et al. 1707.04206 */
       if (strcmp(string1,"disk_accretion") == 0) {
         pth->PBH_accretion_recipe=disk_accretion;
         class_read_double("PBH_ADAF_delta",pth->PBH_ADAF_delta);
@@ -1449,8 +1658,9 @@ int input_read_parameters(
     class_read_double("PBH_relative_velocities",pth->PBH_relative_velocities);
 
   }
-  class_test(pth->PBH_evaporating_mass < 1e15 && pth->PBH_fraction > 1e-4,errmsg,
-    "The value of 'pth->PBH_fraction' that you enter is suspicious given the mass you chose. You are several orders of magnitude above the limit. The code doesn't handle well too high energy injection. Please choose 'pth->PBH_fraction < 1e-4'. ")
+  // GFA: I had to comment out this error, because it was weirdly popping out even when I wasn't selecting any pth->PBH_evaporating_mass at all
+//  class_test(pth->PBH_evaporating_mass < 1e15 && pth->PBH_fraction > 1e-4,errmsg,
+//    "The value of 'pth->PBH_fraction' that you enter is suspicious given the mass you chose. You are several orders of magnitude above the limit. The code doesn't handle well too high energy injection. Please choose 'pth->PBH_fraction < 1e-4'. ")
   class_test(pth->PBH_accreting_mass<0.,errmsg,
     "You need to enter a mass for your PBH 'PBH_accreting_mass > 0.' (in Msun).");
   class_test(pth->PBH_accreting_mass>0. && pth->PBH_fraction == 0,errmsg,
@@ -1459,8 +1669,8 @@ int input_read_parameters(
     "You need to enter a mass for your PBH 'PBH_evaporating_mass > 0.' (in g).");
   class_test(pth->PBH_evaporating_mass>0. && pth->PBH_fraction == 0,errmsg,
     "You have 'PBH_evaporating_mass > 0.' but 'PBH_fraction = 0'. Please adjust your param file.");
-  class_test(pth->PBH_fraction>0. && (pth->PBH_accreting_mass==0. && pth->PBH_evaporating_mass==0.),errmsg,
-    "You have asked for a fraction of PBH being DM but you have 'PBH_accreting_mass == 0 && PBH_evaporating_mass ==0'. Please choose a value (in Msun for PBH_accreting_mass, in g for PBH_evaporating_mass).");
+  class_test(pth->PBH_fraction>0. && (pth->PBH_accreting_mass==0. && pth->PBH_evaporating_mass==0. && pth->has_extended_PBH_MassFunc == _FALSE_ ),errmsg, //GFA
+    "You have asked for a fraction of PBH being DM but you have 'PBH_accreting_mass == 0 && PBH_evaporating_mass ==0 && pth->has_extended_PBH_MassFunc == _FALSE_'. Please choose a value (in Msun for PBH_accreting_mass, in g for PBH_evaporating_mass).");
   class_test(pth->PBH_fraction <0.,errmsg,
     "You need to enter a fraction of PBH 'PBH_fraction  > 0. Please choose a value for PBH_fraction  in ]0,1].'");
   class_test(pth->decay_fraction<0.,errmsg,
@@ -1479,15 +1689,19 @@ int input_read_parameters(
     "Effect of accreting PBH cannot yet be computed using cosmorec. Please, restart using recfast or hyrec. In the case you'd be using hyrec, only the 'on the spot' approximation is currently implemented.");
   class_test(pth->recombination==cosmorec && pth->PBH_evaporating_mass!= 0.,errmsg,
     "Effect of evaporating PBH cannot yet be computed using cosmorec. Please, restart in recfast or hyrec mode.");
+  class_test((pth->recombination==cosmorec || pth->recombination==hyrec ) && pth->has_extended_PBH_MassFunc == _TRUE_,errmsg, //GFA
+      "Effect of extended PBH mass functions cannot yet be computed using cosmorec or hyrec. Please, restart in recfast mode.");
   class_test(pth->recombination==cosmorec && pth->decay_fraction!= 0., errmsg,
     "Effect of decaying DM cannot yet be computed using cosmorec. Please, restart in recfast or hyrec mode.");
+  class_test(pth->recombination==cosmorec && pth->has_UCMH_spike == _TRUE_, errmsg,
+    "Presence of UCMHs from spiky spectrum not yet computed using cosmorec. Please, restart in recfast or hyrec mode."); // GFA
   class_test(pth->PBH_ADAF_delta != 1e-3 && pth->PBH_ADAF_delta != 0.5  && pth->PBH_ADAF_delta != 0.1 ,errmsg,
     "The parameter 'pth->PBH_ADAF_delta' can currently only be set to 1e-3, 0.1 or 0.5.");
   class_test(pth->annihilation>0. && pth->annihilation_cross_section >0.,errmsg,
-    "You gave both boost factor and annihilation parameter, please enter only one.");
+    "You gave both cross section factor and annihilation parameter, please enter only one."); // GFA
 
   if(pth->DM_mass > 0 && pth->annihilation_cross_section >0.){
-      double conversion = 1.78*pow(10,-21); // Conversion GeV => Kg
+      double conversion = 1.78*pow(10,-21); // GFA: Conversion GeV/cm^3 => Kg/m^3
       class_test(pth->DM_mass<=0.,errmsg,
         "You need to enter a mass for your dark matter particle 'm_DM > 0.' (in GeV).");
       pth->annihilation = pth->annihilation_cross_section/(pth->DM_mass*conversion);
@@ -1495,13 +1709,19 @@ int input_read_parameters(
         fprintf(stdout,"You gave m_DM = %.2e and cross_section = %.2e. Your parameter annihilation = %.2e. \n",pth->DM_mass,pth->annihilation_cross_section, pth->annihilation);
   }
 
+  class_test(pth->annihilation <= 0. && pth->has_UCMH_spike ==_TRUE_,errmsg,"you have annihilation = 0 but has_UCMH_spike = yes. That is weird, please check your param file.\n"); // GFA
+
+
   if (pth->annihilation > 0.){
     class_read_double("annihilation_f_halo",pth->annihilation_f_halo);
     class_read_double("annihilation_z_halo",pth->annihilation_z_halo);
   }
 
+  class_test(pth->annihilation_f_halo>0 && pth->has_UCMH_spike == _TRUE_,errmsg,
+    "You cannot work with both annihilation_f_halo > 0 (only standard halos) and has_UCMH_spike = yes (standard halos + UCMHs). Please choose one. ") // GFA
+
   /** - Relevant parameters in case of exotic energy injection */
-  if(pth->annihilation>0. || pth->decay_fraction>0. || pth->PBH_accreting_mass > 0. || pth->PBH_evaporating_mass > 0.){
+  if(pth->annihilation>0. || pth->decay_fraction>0. || pth->PBH_accreting_mass > 0. || pth->PBH_evaporating_mass > 0. || pth->has_extended_PBH_MassFunc == _TRUE_){ //GFA
 
   class_call(parser_read_string(pfc,
                                 "on the spot",
@@ -1569,6 +1789,16 @@ int input_read_parameters(
     pth->has_on_the_spot = _FALSE_;
   }
 
+  if(pth->has_on_the_spot == _TRUE_ && pth->has_extended_PBH_MassFunc == _TRUE_){ // GFA
+    fprintf(stdout,"You cannot work in the 'on the spot' approximation with extended PBH mass function. Condition 'has_on_the_spot' will be set to 'no' automatically.\n");
+    pth->has_on_the_spot = _FALSE_;
+  }
+
+  if(pth->has_on_the_spot == _TRUE_ && pth->has_UCMH_spike == _TRUE_){
+    fprintf(stdout,"You cannot work in the 'on the spot' approximation with UCMHs. Condition 'has_on_the_spot' will be set to 'no' automatically.\n");
+    pth->has_on_the_spot = _FALSE_; // GFA
+  }
+
   class_call(parser_read_double(pfc,"f_eff",&param1,&flag1,errmsg),
              errmsg,
              errmsg);
@@ -1590,6 +1820,7 @@ int input_read_parameters(
     if (strcmp(string1,"Analytical_approximation") == 0) {
       pth->energy_deposition_function=Analytical_approximation;
       flag3=_TRUE_;
+      class_test(pth->has_extended_PBH_MassFunc == _TRUE_,errmsg,"Extended PBH mass functions only coded to work with energy_deposition_function =DarkAges");
     }
     if (strcmp(string1,"DarkAges") == 0) {
       pth->energy_deposition_function=DarkAges;
@@ -1601,6 +1832,7 @@ int input_read_parameters(
       pth->energy_deposition_function=DarkAges;
       pth->has_on_the_spot = _FALSE_;
       flag3=_TRUE_;
+      class_test(pth->has_extended_PBH_MassFunc == _TRUE_,errmsg,"Extended PBH mass functions only coded to work with energy_deposition_function =DarkAges");
     }
     if (strcmp(string1,"from_file") == 0 ) {
       pth->energy_deposition_function=function_from_file;
@@ -1617,10 +1849,13 @@ int input_read_parameters(
           class_test(flag1==_FALSE_,errmsg,"you have forgotten to specify the file to the energy deposition function. Please, do so with energy deposition function file = path_to_a_file.");
         }
         flag3=_TRUE_;
+        class_test(pth->has_extended_PBH_MassFunc == _TRUE_,errmsg,"Extended PBH mass functions only coded to work with energy_deposition_function =DarkAges");
+
     }
     if (strcmp(string1,"No_deposition") == 0) {
       pth->energy_deposition_function=No_deposition;
       flag3=_TRUE_;
+      class_test(pth->has_extended_PBH_MassFunc == _TRUE_,errmsg,"Extended PBH mass functions only coded to work with energy_deposition_function =DarkAges");
     }
 
     class_test(flag3==_FALSE_, errmsg,
@@ -1631,7 +1866,7 @@ int input_read_parameters(
     "You have 'on the spot = yes' but you did not give a value to f_eff. Please adjust your param file.")
 
   class_test(pth->has_on_the_spot == _FALSE_ && flag2 == _FALSE_,errmsg,
-    "You have one of pth->PBH_fraction>0 ||pth->annihilation > 0 || pth->decay_fraction > 0 and on the spot = no but you have not specified energy_deposition_function. Please choose one of 'Analytical_approximation', 'DarkAges', 'from_file', 'no_deposition'.");
+    "You have one of pth->PBH_fraction>0 ||pth->annihilation > 0 || pth->decay_fraction > 0  and on the spot = no but you have not specified energy_deposition_function. Please choose one of 'Analytical_approximation', 'DarkAges', 'from_file', 'no_deposition'.");
 
   class_call(parser_read_string(pfc,
                                 "reio_stars_and_dark_matter",
@@ -1647,7 +1882,7 @@ int input_read_parameters(
     }
     else {
       if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
-        pth->reio_stars_and_dark_matter = _FALSE_;
+        pth->reio_stars_and_dark_matter = _FALSE_; // GFA: this seems the correct prescription, check this is used when considering UCMHs
         pth->reio_parametrization=reio_none;
       }
       else {
@@ -1692,14 +1927,15 @@ int input_read_parameters(
 
       if (strcmp(string1,"built_in") == 0) {
         flag2=_TRUE_;
-        sprintf(ppr->command_fz,""); //Start by reseting previous command, useful in context of MCMC with MontePython.
-        strcat(ppr->command_fz, "python ");
-        strcat(ppr->command_fz,__CLASSDIR__);
-
+        if (pth->has_extended_PBH_MassFunc == _FALSE_) { // GFA, for extended PBH mass functions, we will run this command several times inside thermodynamics.c
+          sprintf(ppr->command_fz,""); //Start by reseting previous command, useful in context of MCMC with MontePython.
+          strcat(ppr->command_fz, "python ");
+          strcat(ppr->command_fz,__CLASSDIR__);
+        }
         /* Check first if injection history is standard and already implemented */
 
         /* Automatic comand for annihialtion without halo boost*/
-        if(pth->annihilation > 0 && pth->annihilation_f_halo == 0){
+        if(pth->annihilation > 0 && pth->annihilation_f_halo == 0 && pth->has_UCMH_spike == _FALSE_){
           strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=annihilation --spectrum ");
           sprintf(string2,"");
           class_call(parser_read_string(pfc,"injected_particle_spectra",&string2,&flag1,errmsg),
@@ -1721,8 +1957,8 @@ int input_read_parameters(
           strcat(ppr->command_fz,string2);
         }
 
-        /* Automatic comand for annihialtion with halo boost*/
-        else if(pth->annihilation > 0 && pth->annihilation_f_halo > 0){
+        /* Automatic comand for annihilation with halo boost*/
+        else if(pth->annihilation > 0 && pth->annihilation_f_halo > 0 && pth->has_UCMH_spike == _FALSE_){
           strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=annihilation_halos --spectrum ");
           sprintf(string2,"");
           class_call(parser_read_string(pfc,"injected_particle_spectra",&string2,&flag1,errmsg),
@@ -1750,15 +1986,39 @@ int input_read_parameters(
           strcat(ppr->command_fz,string2);
         }
 
+        /* GFA, Automatic comand for annihilation within UCMHs */
+        else if(pth->annihilation > 0 && pth->has_UCMH_spike == _TRUE_){
+          strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=annihilation_UCMHs --spectrum ");
+          sprintf(string2,"");
+          class_call(parser_read_string(pfc,"injected_particle_spectra",&string2,&flag1,errmsg),
+                     errmsg,
+                     errmsg);
+          strcat(ppr->command_fz,string2);
+          class_test(strcmp(string2,"") == 0,errmsg,
+            "The field injected_particle_spectra is empty!! you need to give either:\ni) the name of a file in which to get the spectrum\nii) a list of the following keywords ['electron','muon','tau','quark','charm','bottom','top','wboson','zboson','gluon','photon','higgs','dirac_electron','dirac_photon'] with a SPACE (no comas) between each word.\n");
+          strcat(ppr->command_fz," --branching ");
+          sprintf(string2,"");
+          class_call(parser_read_string(pfc,"injected_particle_branching_ratio",&string2,&flag1,errmsg),
+                     errmsg,
+                     errmsg);
+          strcat(ppr->command_fz,string2);
+          class_test(strcmp(string2,"") == 0,errmsg,
+            "The field injected_particle_branching_ratio is empty!! You need to give a list of number (<=1) (as many as there are injected particles) with a SPACE (no comas) between each of them. The sum MUST add to 1.\n");
+          strcat(ppr->command_fz," --mass=");
+          sprintf(string2,"%g",pth->DM_mass);
+          strcat(ppr->command_fz,string2);
+        }
+
         /* Automatic command for PBH evaporation */
         else if(pth->PBH_evaporating_mass > 0){
           strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=evaporating_PBH --mass=");
           sprintf(string2,"%g",pth->PBH_evaporating_mass);
           strcat(ppr->command_fz,string2);
+          printf("I SHOULDN'T BE HERE \n");
         }
 
         /* Automatic command for PBH accretion */
-        else if (pth->PBH_accreting_mass > 0){
+        else if (pth->PBH_accreting_mass > 0 && pth->has_extended_PBH_MassFunc == _FALSE_ ){ // GFA
           strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=accreting_PBH --mass=");
           sprintf(string2,"%g",pth->PBH_accreting_mass);
           strcat(ppr->command_fz,string2);
@@ -2347,7 +2607,6 @@ if(pth->PBH_evaporating_mass > 0.){
 
       if (ppt->has_cdi == _TRUE_) {
         if(pth->PBH_accreting_mass > 0){
-
           ppm->n_cdi = 4.;
           // ppm->f_cdi = pow(pth->PBH_fraction*pth->PBH_accreting_mass/(pba->Omega0_cdm*pba->h*pba->h*3*1e10/(8*_PI_*_G_)/_Sun_mass_over_kg_*_Mpc_over_m_)/ppm->A_s/(2*_PI_*_PI_)*pow(ppm->k_pivot,ppm->n_cdi-1),1./2);
           ppm->f_cdi = pth->PBH_fraction*pow(pth->PBH_accreting_mass*_Sun_mass_over_kg_/(pth->PBH_fraction*pba->Omega0_cdm*pow(pba->H0*_c_/_Mpc_over_m_,2)*3/(8*_PI_*_G_))/pow(_Mpc_over_m_,3)/ppm->A_s/(8*_PI_*_PI_*_PI_),1./2);
@@ -2728,6 +2987,13 @@ if(pth->PBH_evaporating_mass > 0.){
                errmsg,
                "inflationary module cannot work if you ask for isocurvature modes");
   }
+
+  if (pth->has_UCMH_spike == _TRUE_) { //GFA
+    pth->A_s = ppm->A_s;
+    pth->n_s = ppm->n_s;
+    pth->k_pivot = ppm->k_pivot;
+    pth->Number_z = ppr->Number_z;
+ }
 
   /** (e) parameters for final spectra */
 
@@ -3214,6 +3480,20 @@ if(pth->PBH_evaporating_mass > 0.){
   class_read_string("R_inf hyrec file",ppr->hyrec_R_inf_file);
   class_read_string("two_photon_tables hyrec file",ppr->hyrec_two_photon_tables_file);
 
+ // GFA, relevant precision parameters for the calculation of the boost DM annihilation factor in the UCMH+NFW scenario
+
+  if (pth->has_UCMH_spike == _TRUE_) {
+    class_read_double("Mass_max",ppr->Mass_max);
+    class_read_double("k_min",ppr->k_min);
+    class_read_double("z_min",ppr->z_min);
+    class_read_double("z_max",ppr->z_max);
+    class_read_int("Number_k",ppr->Number_k);
+    class_read_int("Number_M",ppr->Number_M);
+    class_read_int("Number_z",ppr->Number_z);
+  }
+
+
+
   class_read_double("reionization_z_start_max",ppr->reionization_z_start_max);
   class_read_double("reionization_sampling",ppr->reionization_sampling);
   class_read_double("reionization_optical_depth_tol",ppr->reionization_optical_depth_tol);
@@ -3651,11 +3931,21 @@ int input_default_params(
   pth->annihilation = 0.;
   pth->annihilation_cross_section = 0.;
   pth->f_eff = 0;
+  pth->has_extended_PBH_MassFunc = _FALSE_; //GFA
+  pth->log10_Mcut_PBH = 2;
+  pth->num_PBH_accreting_mass = 10;
+  pth->has_UCMH_spike = _FALSE_; // GFA
+  pth->A_spike = 1.e-10;
+  pth->k_spike =1.e3;
+  pth->f_2 = 30.;
+  pth->Delta_c = 200.;
+  pth->Mass_min = 1.0e-6;
   pth->DM_mass = 0;
   pth->decay_fraction = 0.;
   pth->PBH_accreting_mass = 0.;
-  pth->PBH_evaporating_mass = 0.;
+  pth->PBH_evaporating_mass = 0.0;
   pth->PBH_fraction = 0.;
+  pth->PBH_fraction_LIGO =0.; //GFA
   pth->PBH_accretion_eigenvalue = 0.1; //Standard value in the ADAF scenario choose as benchmark.
   pth->PBH_relative_velocities = -1 ; //Standard value is the linear result extrapolated to PBH.
   pth->energy_repart_coefficient = GSVI;
@@ -3773,6 +4063,9 @@ int input_default_params(
   ppm->k_pivot = 0.05;
   ppm->A_s = 2.215e-9;
   ppm->n_s = 0.9619;
+  pth->A_s = ppm->A_s; //GFA
+  pth->n_s = ppm->n_s;
+  pth->k_pivot = ppm->k_pivot;
   ppm->alpha_s = 0.;
   ppm->f_bi = 1.;
   ppm->n_bi = 1.;
@@ -3941,9 +4234,15 @@ int input_default_precision ( struct precision * ppr ) {
   /* for bbn */
   sprintf(ppr->sBBN_file,__CLASSDIR__);
   strcat(ppr->sBBN_file,"/bbn/sBBN_2017.dat");
+  sprintf(ppr->boost_file,__CLASSDIR__);
+  strcat(ppr->boost_file,"/Boost_vs_z.txt"); //GFA
+
+
   /*For energy injection from DM annihilation or decays */
   sprintf(ppr->energy_injec_coeff_file,__CLASSDIR__);
   strcat(ppr->energy_injec_coeff_file,"/DarkAgesModule/GSVI_file.dat"); //Default correspond to the GSVI case
+  sprintf(ppr->PBH_MF_file,__CLASSDIR__); //GFA
+  strcat(ppr->PBH_MF_file,"/PBH_mass_function/Mcut10e2_b.txt");
   sprintf(ppr->energy_injec_f_eff_file,__CLASSDIR__);
   strcat(ppr->energy_injec_f_eff_file,"/EnergyInjection_example_file_type1.dat");
 
@@ -4004,6 +4303,17 @@ int input_default_precision ( struct precision * ppr ) {
   sprintf(ppr->hyrec_two_photon_tables_file,__CLASSDIR__);
 //  strcat(ppr->hyrec_two_photon_tables_file,"/hyrec/two_photon_tables.dat");
   strcat(ppr->hyrec_two_photon_tables_file,"/hyrec_2017/two_photon_tables.dat");
+
+  // GFA, relevant precision parameters for the calculation of the boost DM annihilation factor in the UCMH+NFW scenario
+  ppr->Mass_max = 6.0e15;
+  ppr->k_min = 1.0e-5;
+  ppr->z_min = 1.0e-3;
+  ppr->z_max = 2.e4;
+
+  ppr->Number_k = 100;
+  ppr->Number_M = 100;
+  ppr->Number_z = 100;
+
 
   /* for reionization */
 

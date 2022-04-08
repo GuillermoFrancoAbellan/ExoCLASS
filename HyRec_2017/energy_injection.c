@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include "include/hyrectools.h"
 #include "include/energy_injection.h"
+#include "arrays.h" //GFA
+
 
 
 /***************************************************************************************
@@ -56,20 +58,33 @@ double dEdtdV_DM_ann(double z, INJ_PARAMS *params){
   //   pann_tot += params->pann_halo *erfc;
   // }
 
+   if (params->has_UCMH_spike == 1) { // GFA
 
+     if (z>1.e-3) {
+       Boost_factor = array_interpolate_linear_simpler(params->z_table_for_boost,params->Number_z,params->boost_table,z);
+     } else {
+       Boost_factor = params->boost_table[0];
+     }
 
-    if(params->ann_f_halo>0.){
-      u_min = zp1/zp1_halo;
-      erfc  = pow(1.+0.278393*u_min+0.230389*u_min*u_min+0.000972*u_min*u_min*u_min+0.078108*u_min*u_min*u_min*u_min,-4);
-      Boost_factor = params->ann_f_halo*erfc/pow(zp1,3);
-    }
-    else Boost_factor = 0;
+     return square(10537.4*params->odmh2)*1e-9*(pow((zp1),6)*params->pann)*Boost_factor;
+   // return square(10537.4*params->odmh2) * zp1*zp1*zp1 *1e-9* pann_tot;
+   /* the prefactor is 3 H100^2/(8 Pi G) c^2 in eV/cm^3, H100 = 100km/s/Mpc */
+   /* pann is given in cm^3/s/GeV, multiply by 1e-9 to get cm^3/s/eV */
 
-    return square(10537.4*params->odmh2)*1e-9*(pow((zp1),6)*params->pann)*(1+Boost_factor);
+   } else {
 
-  // return square(10537.4*params->odmh2) * zp1*zp1*zp1 *1e-9* pann_tot;
-  /* the prefactor is 3 H100^2/(8 Pi G) c^2 in eV/cm^3, H100 = 100km/s/Mpc */
-  /* pann is given in cm^3/s/GeV, multiply by 1e-9 to get cm^3/s/eV */
+     if(params->ann_f_halo>0.){
+       u_min = zp1/zp1_halo;
+       erfc  = pow(1.+0.278393*u_min+0.230389*u_min*u_min+0.000972*u_min*u_min*u_min+0.078108*u_min*u_min*u_min*u_min,-4);
+       Boost_factor = params->ann_f_halo*erfc/pow(zp1,3);
+     }
+     else Boost_factor = 0;
+
+     return square(10537.4*params->odmh2)*1e-9*(pow((zp1),6)*params->pann)*(1+Boost_factor);
+   // return square(10537.4*params->odmh2) * zp1*zp1*zp1 *1e-9* pann_tot;
+   /* the prefactor is 3 H100^2/(8 Pi G) c^2 in eV/cm^3, H100 = 100km/s/Mpc */
+   /* pann is given in cm^3/s/GeV, multiply by 1e-9 to get cm^3/s/eV */
+   }
 
 }
 /******************************Energy Injection DM decay**********************************/

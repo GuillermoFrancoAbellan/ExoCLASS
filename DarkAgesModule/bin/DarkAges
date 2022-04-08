@@ -56,7 +56,8 @@ parser.add_option("--model", dest='model', metavar='MODEL',
                   help="Load a preprocessed model")
 parser.add_option("--rebuild-model", action='store_true', dest='rebuild_model', default=False,
                   help="Force rebuilding a model")
-parser.add_option("--hist", default='annihilation', choices=['annihilation','annihilation_halos','decay','evaporating_PBH','accreting_PBH'], dest='injection_history',
+# GFA
+parser.add_option("--hist", default='annihilation', choices=['annihilation','annihilation_halos','annihilation_UCMHs','decay','evaporating_PBH','accreting_PBH'], dest='injection_history',
                   help="Define the injection history of the model.")
 parser.add_option("-m","--mass", type="float", dest='mass',
                   help="Define the mass of the DM-candidate [in GeV] or the PBH mass [in g for evaporating PBH and Msun for accreting ones].")
@@ -125,7 +126,7 @@ if options.nbins_table is not None or options.Log10Emin is not None or options.L
 	if options.nbins_table is None: options.nbins_table = tmp_logE.__len__()
 	if options.Log10Emin is None: options.Log10Emin = tmp_logE.min()
 	if options.Log10Emax is None: options.Log10Emax = tmp_logE.max()
-	set_logEnergies(np.linspace(options.Log10Emin,options.Log10Emax,options.nbins_table))
+	set_logEnergies(np.linspace(options.Log10Emin,options.Log10Emax,int(options.nbins_table)))
 	del tmp_logE
 
 DarkOptions = dict()
@@ -196,7 +197,7 @@ if options.injection_history == 'evaporating_PBH':
 if options.injection_history == 'accreting_PBH' and ((options.accretion_recipe is None)):
 	raise DarkAgesError('When choosing the injection history: "accreting_PBH" you need to specify the accretion recipe: spherical_accretion or disk_accretion.')
 if options.injection_history == 'accreting_PBH':
-	sys.exit( recipes.accreting_PBH(options.mass, options.accretion_recipe, transfer_functions, **DarkOptions) )
+	sys.exit( recipes.accreting_PBH(options.mass, options.accretion_recipe, transfer_functions, **DarkOptions) ) #exits python and executes recipes.accreting_PBH()
 
 if options.spectrum is not None:
 	if options.branchings is None:

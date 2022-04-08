@@ -73,7 +73,8 @@
  */
 
 #include "thermodynamics.h"
-
+#include "integration_routines.h" // GFA
+#include "root_finding_routines.h"  // GFA
 #ifdef HYREC
 #include "hyrec.h"
 #endif
@@ -298,6 +299,11 @@ int thermodynamics_init(
   double g_max;
   int index_tau_max;
 
+  int index_z; // GFA
+  int status;
+  FILE * file_boost = fopen(ppr->boost_file, "w");
+
+
 
   /** - initialize pointers, allocate background vector */
 
@@ -327,13 +333,33 @@ int thermodynamics_init(
              pth->error_message,
              "Y_He=%g out of bounds (%g<Y_He<%g)",pth->YHe,_YHE_SMALL_,_YHE_BIG_);
 
+  // GFA: compute boost factor here
+    if (pth->has_UCMH_spike == _TRUE_) {
+        class_alloc(pth->z_table_for_boost,ppr->Number_z*sizeof(double),pth->error_message);
+        class_alloc(pth->boost_table,ppr->Number_z*sizeof(double),pth->error_message);
+        class_call(compute_boost_NFW_UCMH(ppr,pba,pth),pth->error_message,pth->error_message);
+        /* write the results for the boost factor in a datafile, they will be read later inside DarkAges */
+        for (index_z=0; index_z <= ppr->Number_z; index_z++) {
+         fprintf(file_boost, "%e\t %e \n",pth->z_table_for_boost[index_z], pth->boost_table[index_z]);
+        }
+        fclose(file_boost);
+    }
+
+
   /** Initialize annihilation coefficient (First check if exotic energy injection is demanded) */
 
-  if(pth->annihilation >0 || pth->decay_fraction > 0 || pth->PBH_accreting_mass > 0 || pth->PBH_evaporating_mass > 0){
+  if(pth->annihilation >0 || pth->decay_fraction > 0 || pth->PBH_accreting_mass > 0 || pth->PBH_evaporating_mass > 0 || pth->has_extended_PBH_MassFunc == _TRUE_){
     if(pth->energy_repart_coefficient==GSVI || pth->energy_repart_coefficient==no_factorization || pth->energy_repart_coefficient ==chi_from_file){
-      class_call(thermodynamics_annihilation_coefficients_init(ppr,pba,pth),
-                 pth->error_message,
-                 pth->error_message);
+
+      if (pth->has_extended_PBH_MassFunc == _TRUE_) { // compute functions f(z) per channel and now also per each mass
+        class_call(thermodynamics_annihilation_coefficients_init_PBH_MF(ppr,pba,pth),
+                   pth->error_message,
+                   pth->error_message);
+      } else {
+        class_call(thermodynamics_annihilation_coefficients_init(ppr,pba,pth),
+                   pth->error_message,
+                   pth->error_message);
+      }
     }
 
     if(pth->has_on_the_spot==_FALSE_ && pth->energy_repart_coefficient!=no_factorization){
@@ -365,15 +391,10 @@ int thermodynamics_init(
   class_test(pth->PBH_evaporating_mass > 0 && pth->PBH_evaporating_mass < 1e15 && pth->PBH_fraction > 1e-4,pth->error_message,
 	     "The value of 'pth->PBH_fraction' that you enter is suspicious given the mass you chose. You are several orders of magnitude above the limit. The code doesn't handle well too high energy injection. Please choose  'pth->PBH_fraction < 1e-4'. ")
 
-    // class_test((pth->annihilation_f_halo>0) && (pth->recombination==recfast),
-    //            pth->error_message,
-    //            "Switching on DM annihilation in halos requires using HyRec instead of RECFAST. Otherwise some values go beyond their range of validity in the RECFAST fits, and the thermodynamics module fails. Two  solutions: add 'recombination = HyRec' to your input, or set 'annihilation_f_halo = 0.' (default).");
 
-
-
-    class_test((pth->annihilation>0)&&(pba->has_cdm==_FALSE_),
-               pth->error_message,
-               "CDM annihilation effects require the presence of CDM!");
+  class_test((pth->annihilation>0)&&(pba->has_cdm==_FALSE_),
+        pth->error_message,
+        "CDM annihilation effects require the presence of CDM!");
 
   // class_test((pth->annihilation_f_halo>0) && (pth->recombination==recfast),
   //            pth->error_message,
@@ -386,6 +407,14 @@ int thermodynamics_init(
   class_test((pth->annihilation_z_halo<0),
 	     pth->error_message,
 	     "Parameter for DM annihilation in halos cannot be negative");
+
+  class_test((pth->A_spike <0), // GFA
+     	 pth->error_message,
+     	 "Amplitude of spike in UCMHs cannot be negative");
+
+  class_test((pth->k_spike <0),
+     	 pth->error_message,
+     	 "Location of spike in UCMHs cannot be negative");
 
   if (pth->thermodynamics_verbose > 0)
     if ((pth->annihilation >0) && (pth->reio_parametrization == reio_none) && (ppr->recfast_Heswitch >= 3) && (pth->recombination==recfast))
@@ -419,6 +448,7 @@ int thermodynamics_init(
   class_call(thermodynamics_recombination(ppr,pba,pth,preco,pvecback),
              pth->error_message,
              pth->error_message);
+
 
   /** - if there is reionization, solve reionization and store values of \f$ z, x_e, d \kappa / d \tau, T_b, c_b^2 \f$ with thermodynamics_reionization()*/
 
@@ -884,6 +914,19 @@ int thermodynamics_init(
     }
   }
 
+  // GFA
+  if (pth->has_UCMH_spike == _TRUE_) {
+    status = remove(ppr->boost_file); //remove file after all calculations are done, just to avoid generating thousands of file when running an MCMC on MontePython
+    if (status == 0) {
+      if (pth->thermodynamics_verbose > 1) {
+        printf("Boost file deleted successfully \n");
+      }
+    } else {
+      printf("Unable to delete the Boost file \n");
+      exit(EXIT_FAILURE);
+     }
+  }
+
   free(pvecback);
 
   return _SUCCESS_;
@@ -904,6 +947,8 @@ int thermodynamics_free(
   free(pth->z_table);
   free(pth->thermodynamics_table);
   free(pth->d2thermodynamics_dz2_table);
+
+
 
   return _SUCCESS_;
 }
@@ -1325,15 +1370,16 @@ int thermodynamics_annihilation_coefficients_init(
       printf(" -> running: %s\n", command_with_arguments);
     }
     /* Launch the process and retrieve the output */
-    fflush(fA);
-    fA = popen(command_with_arguments, "r");
-    class_test(fA == NULL, pth->error_message, "The program failed to set the environment for the external command.");
+    fflush(fA); // clean the buffer
+    fA = popen(command_with_arguments, "r"); // popen stands for process-open, in "read" mode
+    class_test(fA == NULL, pth->error_message, "The program failed to set the environment for the external command."); //process is launched here
+    // all the output of DarkAges is now stored in file fA
   }
 
   /* END */
 
   /* go through each line */
-  while (fgets(line,_LINE_LENGTH_MAX_-1,fA) != NULL) {
+  while (fgets(line,_LINE_LENGTH_MAX_-1,fA) != NULL) { //each row of the file fA is stored in "line" variable
     /* eliminate blank spaces at beginning of line */
     left=line;
     while (left[0]==' ') {
@@ -1354,7 +1400,7 @@ int thermodynamics_annihilation_coefficients_init(
         /* read num_lines, infer size of arrays and allocate them */
         class_test(sscanf(line,"%d",&num_lines) != 1,
                    pth->error_message,
-                   "could not read value of parameters num_lines in file %s\n",ppr->energy_injec_coeff_file);
+                   "could not read value of parameters num_lines in file %s\n",ppr->energy_injec_coeff_file); //num_lines is not 0 anymore
         class_alloc(pth->annihil_coef_xe,num_lines*sizeof(double),pth->error_message);
         class_alloc(pth->annihil_coef_heat,num_lines*sizeof(double),pth->error_message);
         class_alloc(pth->annihil_coef_lya,num_lines*sizeof(double),pth->error_message);
@@ -1462,6 +1508,168 @@ int thermodynamics_annihilation_coefficients_init(
   return _SUCCESS_;
 
 }
+
+// GFA, only used in the extended PBH mass function scenarios
+// this function calls DarkAges several times (one per each mass), by writting a python command with a different mass each time
+// results per z and per mass are stored in the matrices annihil_coef_X_at_mass, annihil_coef_dd_X_at_mass (required for interpolation),
+// where X indicates the specific channel (heat, lya, etc)
+int thermodynamics_annihilation_coefficients_init_PBH_MF(
+                                                         struct precision * ppr,
+                                                         struct background * pba,
+                                                         struct thermo * pth
+                                                         ) {
+
+  FILE * fA = NULL;
+  char line[_LINE_LENGTH_MAX_];
+  char * left;
+
+  char command_with_arguments[2*_ARGUMENT_LENGTH_MAX_];
+  char string2[_ARGUMENT_LENGTH_MAX_];
+  int status;
+  int index_M;
+
+  int num_lines;
+  int array_line;
+
+  class_alloc(pth->annihil_coef_xe_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_heat_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_lya_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_ionH_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_ionHe_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_lowE_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+
+  class_alloc(pth->annihil_coef_dd_heat_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_dd_lya_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_dd_ionH_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_dd_ionHe_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+  class_alloc(pth->annihil_coef_dd_lowE_at_mass, sizeof(double*)*pth->num_PBH_accreting_mass,pba->error_message);
+
+  class_alloc(pth->annihil_coef_num_lines_at_mass, sizeof(int)*pth->num_PBH_accreting_mass,pba->error_message);
+
+
+  for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+
+    num_lines= 0;
+    array_line=0;
+    sprintf(ppr->command_fz,"");
+    strcat(ppr->command_fz, "python ");
+    strcat(ppr->command_fz,__CLASSDIR__);
+    strcat(ppr->command_fz,"/DarkAgesModule/bin/DarkAges --hist=accreting_PBH --mass=");
+    sprintf(string2,"%g",pth->table_PBH_accreting_mass[index_M]);
+    strcat(ppr->command_fz,string2);
+    if(pth->PBH_accretion_recipe==spherical_accretion) {
+      strcat(ppr->command_fz," --accretion_recipe=spherical_accretion");
+    } else if (pth->PBH_accretion_recipe==disk_accretion) {
+      strcat(ppr->command_fz," --accretion_recipe=disk_accretion");
+    }
+    strcat(ppr->command_fz," --Log10Emin=0 --Log10Emax=5.5 --nbins_table=20");
+    sprintf(command_with_arguments, "%s", ppr->command_fz);
+    if (pth->thermodynamics_verbose > 0) {
+      printf(" -> running: %s\n", command_with_arguments);
+    }
+    fflush(fA);
+    fA = popen(command_with_arguments, "r");
+    class_test(fA == NULL, pth->error_message, "The program failed to set the environment for the external command.");
+
+    while (fgets(line,_LINE_LENGTH_MAX_-1,fA) != NULL) {
+      left=line;
+      while (left[0]==' ') {
+        left++;
+      }
+
+      if (left[0] > 39) {
+        if (num_lines == 0) {
+          class_test(sscanf(line,"%d",&num_lines) != 1,
+                     pth->error_message,
+                     "could not read value of parameters num_lines in file %s\n",ppr->energy_injec_coeff_file); //num_lines is not 0 anymore
+          class_alloc(pth->annihil_coef_xe_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_heat_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_lya_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_ionH_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_ionHe_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_lowE_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+
+          class_alloc(pth->annihil_coef_dd_heat_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_dd_lya_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_dd_ionH_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_dd_ionHe_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          class_alloc(pth->annihil_coef_dd_lowE_at_mass[index_M],num_lines*sizeof(double),pth->error_message);
+          pth->annihil_coef_num_lines_at_mass[index_M] = num_lines;
+          array_line=0;
+        }
+        else {
+          /* read coefficients */
+          class_test(sscanf(line,"%lg %lg %lg %lg %lg %lg",
+                            &(pth->annihil_coef_xe_at_mass[index_M][array_line]),
+                            &(pth->annihil_coef_heat_at_mass[index_M][array_line]),
+                            &(pth->annihil_coef_lya_at_mass[index_M][array_line]),
+                            &(pth->annihil_coef_ionH_at_mass[index_M][array_line]),
+                            &(pth->annihil_coef_ionHe_at_mass[index_M][array_line]),
+                            &(pth->annihil_coef_lowE_at_mass[index_M][array_line])) != 6,
+                     pth->error_message,
+                     "could not read value of parameters coeeficients in file \n");
+          array_line ++;
+        }
+      }
+    }
+
+    status = pclose(fA);
+    class_test(status != 0., pth->error_message, "The attempt to launch the external command was not successful. Maybe the output of the external command is not in the right format.");
+
+    class_call(array_spline_table_lines(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_heat_at_mass[index_M],
+                                        1,
+                                        pth->annihil_coef_dd_heat_at_mass[index_M],
+                                        _SPLINE_NATURAL_,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+
+    class_call(array_spline_table_lines(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_lya_at_mass[index_M],
+                                        1,
+                                        pth->annihil_coef_dd_lya_at_mass[index_M],
+                                        _SPLINE_NATURAL_,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+
+    class_call(array_spline_table_lines(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_ionH_at_mass[index_M],
+                                        1,
+                                        pth->annihil_coef_dd_ionH_at_mass[index_M],
+                                        _SPLINE_NATURAL_,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+    class_call(array_spline_table_lines(pth->annihil_coef_xe_at_mass[index_M],
+                                       pth->annihil_coef_num_lines_at_mass[index_M],
+                                       pth->annihil_coef_ionHe_at_mass[index_M],
+                                       1,
+                                       pth->annihil_coef_dd_ionHe_at_mass[index_M],
+                                       _SPLINE_NATURAL_,
+                                       pth->error_message),
+                pth->error_message,
+                pth->error_message);
+    class_call(array_spline_table_lines(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_lowE_at_mass[index_M],
+                                        1,
+                                        pth->annihil_coef_dd_lowE_at_mass[index_M],
+                                        _SPLINE_NATURAL_,
+                                        pth->error_message),
+                 pth->error_message,
+                 pth->error_message);
+
+  }
+
+  return _SUCCESS_;
+}
+
+
 /**
  * This function is used by the energy injection module for two different interpolations:
  * Either to directly interpolate the f(z) functions per channels or to interpolate
@@ -1549,6 +1757,89 @@ int thermodynamics_annihilation_coefficients_interpolate(
 
 }
 
+// GFA, in the extended PBH mass function scenario this interpolate the f(z) functions per channel,
+// for each of the different masses considered
+int thermodynamics_annihilation_coefficients_interpolate_PBH_MF(
+                                                                struct precision * ppr,
+                                                                struct background * pba,
+                                                                struct thermo * pth,
+                                                                double xe_or_z
+                                                                ) {
+
+  int last_index;
+  int index_M;
+
+  for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+
+    class_call(array_interpolate_spline(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_heat_at_mass[index_M],
+                                        pth->annihil_coef_dd_heat_at_mass[index_M],
+                                        1,
+                                        xe_or_z,
+                                        &last_index,
+                                        &(pth->chi_heat_at_mass[index_M]),
+                                        1,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+
+    class_call(array_interpolate_spline(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_lya_at_mass[index_M],
+                                        pth->annihil_coef_dd_lya_at_mass[index_M],
+                                        1,
+                                        xe_or_z,
+                                        &last_index,
+                                        &(pth->chi_lya_at_mass[index_M]),
+                                        1,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+
+    class_call(array_interpolate_spline(pth->annihil_coef_xe_at_mass[index_M],
+                                        pth->annihil_coef_num_lines_at_mass[index_M],
+                                        pth->annihil_coef_ionH_at_mass[index_M],
+                                        pth->annihil_coef_dd_ionH_at_mass[index_M],
+                                        1,
+                                        xe_or_z,
+                                        &last_index,
+                                        &(pth->chi_ionH_at_mass[index_M]),
+                                        1,
+                                        pth->error_message),
+               pth->error_message,
+               pth->error_message);
+      class_call(array_interpolate_spline(pth->annihil_coef_xe_at_mass[index_M],
+                                         pth->annihil_coef_num_lines_at_mass[index_M],
+                                         pth->annihil_coef_ionHe_at_mass[index_M],
+                                         pth->annihil_coef_dd_ionHe_at_mass[index_M],
+                                         1,
+                                         xe_or_z,
+                                         &last_index,
+                                         &(pth->chi_ionHe_at_mass[index_M]),
+                                         1,
+                                         pth->error_message),
+                pth->error_message,
+                pth->error_message);
+      class_call(array_interpolate_spline(pth->annihil_coef_xe_at_mass[index_M],
+                                         pth->annihil_coef_num_lines_at_mass[index_M],
+                                         pth->annihil_coef_lowE_at_mass[index_M],
+                                         pth->annihil_coef_dd_lowE_at_mass[index_M],
+                                         1,
+                                         xe_or_z,
+                                         &last_index,
+                                         &(pth->chi_lowE_at_mass[index_M]),
+                                         1,
+                                         pth->error_message),
+                pth->error_message,
+                pth->error_message);
+
+  }
+
+  return _SUCCESS_;
+
+}
+
 
 int thermodynamics_annihilation_coefficients_free(
                                                   struct thermo * pth
@@ -1566,6 +1857,7 @@ int thermodynamics_annihilation_coefficients_free(
   free(pth->annihil_coef_dd_ionH);
   free(pth->annihil_coef_dd_ionHe);
   free(pth->annihil_coef_dd_lowE);
+
 
   return _SUCCESS_;
 
@@ -1745,13 +2037,27 @@ int thermodynamics_DM_annihilation_energy_injection(
 
   rho_cdm_today = pow(pba->H0*_c_/_Mpc_over_m_,2)*3/8./_PI_/_G_*(pba->Omega0_cdm)*_c_*_c_; /* energy density in J/m^3 */
 
-  if(preco->annihilation_z_halo>0.){
-  Boost_factor = preco->annihilation_f_halo*erfc((1+z)/(1+preco->annihilation_z_halo))/pow(1+z,3);
-  }
-  else Boost_factor = 0;
+  if (preco->has_UCMH_spike == _TRUE_) {
+    if (z>1.e-3) {
+      Boost_factor = array_interpolate_linear_simpler(preco->z_table_for_boost,ppr->Number_z,preco->boost_table,z);
+    } else {
+      Boost_factor = preco->boost_table[0];
+    }
 
-  *energy_rate = pow(rho_cdm_today,2)/_c_/_c_*(pow((1.+z),6)*preco->annihilation)*(1+Boost_factor);
-  /* energy density rate in J/m^3/s (remember that sigma_thermal/(preco->annihilation_m_DM*conversion) is in m^3/s/Kg) */
+    *energy_rate = pow(rho_cdm_today,2)/_c_/_c_*(pow((1.+z),6)*preco->annihilation)*Boost_factor;
+    /* energy density rate in J/m^3/s (remember that sigma_thermal/(preco->annihilation_m_DM*conversion) is in m^3/s/Kg) */
+
+  } else {
+
+    if(preco->annihilation_z_halo>0.) {
+      Boost_factor = preco->annihilation_f_halo*erfc((1+z)/(1+preco->annihilation_z_halo))/pow(1+z,3);
+    }
+     else Boost_factor = 0;
+
+    *energy_rate = pow(rho_cdm_today,2)/_c_/_c_*(pow((1.+z),6)*preco->annihilation)*(1+Boost_factor);
+    /* energy density rate in J/m^3/s (remember that sigma_thermal/(preco->annihilation_m_DM*conversion) is in m^3/s/Kg) */
+
+  }
 
 }
 /******************************Energy Injection DM decay**********************************/
@@ -1999,7 +2305,7 @@ int thermodynamics_evaporating_pbh_energy_injection(
     dMdt=5.34e-5*f*pow(pbh_mass/1e10,-2)*1e10;
   }
   *energy_rate = rho_cdm_today*pow((1+z),3)*preco->PBH_fraction/preco->PBH_evaporating_mass*em_branching*(dMdt);
-  // *energy_rate = rho_cdm_today*pow((1+z),3)*preco->PBH_fraction/pbh_mass*em_branching*(dMdt);
+
   if(isnan(*energy_rate)==1 || *energy_rate < 0){
     *energy_rate=0.;
   }
@@ -2179,13 +2485,207 @@ int thermodynamics_accreting_pbh_energy_injection(
           L_acc = 1./137*T_s/(m_p)*J*pow(M_b_dot*_c_*_c_,2)/L_ed;
          }
 
-
-
         *energy_rate =  (rho_cdm_today/(preco->PBH_accreting_mass*M_sun*_c_*_c_))*pow(1+z,3)*L_acc*preco->PBH_fraction;
         // fprintf(stdout, "%e %e %e %e %e %e %e %e %e %e %e %e\n",z, beta_compton_drag, gamma_cooling,lambda,M_b_dot*_c_*_c_/L_ed,T_s*1e6/_eV_over_Kelvin_,T_s*J/m_p/137,v_eff,v_B,v_l,L_acc_2/L_ed,*energy_rate);
         // fprintf(stdout, "%e %e %e %e %e %e %e %e \n",x_e, M_b_dot,lambda,m_dot_2,l2,L_acc_2,*energy_rate,z);
         // fprintf(stdout, "%e %e %e \n", z,M_b_dot*_c_*_c_/L_ed,L_acc_2/L_ed);
         free(pvecback);
+
+}
+
+//GFA, this function computes the energy injection coming from accreting black holes
+// for different values of the PBH masses, and store the results in preco->energy_rate_at_mass[index_M]
+int thermodynamics_accreting_pbh_energy_injection_PBH_MF(
+                                                         struct precision * ppr,
+                                                         struct background * pba,
+                                                         struct recombination * preco,
+                                                         double z,
+                                                         ErrorMsg error_message
+                                                        ){
+
+  double rho_cdm_today;
+  double tau;
+  int last_index_back;
+  int index_M; // GFA
+  double * pvecback;
+  //Parameters related to PBH
+  double c_s, v_eff,v_eff_2,v_l, r_B,x_e,beta,beta_eff,beta_hat,x_cr,lambda,n_gas,M_b_dot,M_sun,M_ed_dot,epsilon,L_acc,Integrale,Normalization;
+  double m_H, m_dot, m_dot_2, L_acc_2,L_ed,l,l2,M_crit;
+  double rho, m_p = 938, m_e = 0.511, T_infinity = 0, rho_infinity = 0, x_e_infinity = 0, P_infinity = 0, rho_cmb = 0, t_B = 0, v_B = 0;
+  double lambda_1,lambda_2,lambda_ad,lambda_iso,gamma_cooling,beta_compton_drag, T_s, T_ion, Y_s, J,tau_cooling;
+  double Value_min, Value_med, Value_max, a=0, epsilon_0=0.1;
+  rho_cdm_today = pow(pba->H0*_c_/_Mpc_over_m_,2)*3/8./_PI_/_G_*(pba->Omega0_cdm)*_c_*_c_; /* energy density in J/m^3 */
+
+  class_alloc(pvecback,pba->bg_size*sizeof(double),pba->error_message);
+
+  for (index_M=0; index_M < preco->num_PBH_accreting_mass; index_M++) {
+
+    class_call(background_tau_of_z(pba,
+                                   z,
+                                   &tau),
+               pba->error_message,
+               error_message);
+
+    class_call(background_at_tau(pba,
+                                 tau,
+                                 pba->long_info,
+                                 pba->inter_normal,
+                                 &last_index_back,
+                                 pvecback),
+               pba->error_message,
+               error_message);
+
+
+          c_s = 5.7e3*pow(preco->Tm_tmp/2730,0.5);//conversion km en m
+          M_sun = 2e30; // in Kg
+          n_gas = 200*1e6*pow((1+z)/1000,3); // 1e6 = conversion cm^-3 en m^-3;
+          m_H= 1.67e-27; // Hydrogen mass in kg
+
+          // x_e = 1;
+          x_e = preco->xe_tmp;
+          T_infinity = preco->Tm_tmp*_eV_over_Kelvin_*1e-6; //Temperature in MeV
+          /** Disk accretion from Poulin et al. 1707.04206 */
+          if(preco->PBH_accretion_recipe == disk_accretion){
+              L_ed = 4*_PI_*_G_*preco->table_PBH_accreting_mass[index_M]*M_sun*m_p*1e6/_eV_over_joules_/(_sigma_*_c_);
+              M_ed_dot= 10*L_ed/(_c_*_c_);
+              M_crit = 0.01*M_ed_dot;
+              v_B = sqrt((1+x_e)*T_infinity/m_p)*_c_;
+
+
+
+              if(preco->PBH_relative_velocities < 0.){
+                v_l = 30*MIN(1,z/1000)*1e3; // in m/s.
+                if(v_B < v_l) v_eff = sqrt(v_B*v_l);
+                else v_eff = v_B;
+              }
+              else{
+                v_l = preco->PBH_relative_velocities*1e3; // converted to m/s.
+                v_eff = pow(v_l*v_l+v_B*v_B,0.5);
+              }
+
+              lambda = preco->PBH_accretion_eigenvalue;
+              rho = pvecback[pba->index_bg_rho_b]/pow(_Mpc_over_m_,2)*3/8./_PI_/_G_*_c_*_c_; /* energy density in kg/m^3 */
+              M_b_dot = 4*_PI_*lambda*pow(_G_*preco->table_PBH_accreting_mass[index_M]*M_sun,2)*rho*pow(v_eff,-3.);
+
+              if(preco->PBH_ADAF_delta == 1e-3){
+                Value_min = 7.6e-5;
+                Value_med = 4.5e-3;
+                Value_max = 7.1e-3;
+                if(M_b_dot/M_ed_dot <= Value_min){
+                  epsilon_0 = 0.065;
+                  a = 0.71;
+                }
+                else if(Value_min < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot  <= Value_med){
+                  epsilon_0 = 0.020;
+                  a = 0.47;
+                }
+                else if(Value_med < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot <= Value_max){
+                  epsilon_0 = 0.26;
+                  a = 3.67;
+                }
+                else{
+                  epsilon_0 = 0.1;
+                  a = 0.;
+                }
+                epsilon = epsilon_0 * pow(M_b_dot / M_crit,a);
+              }
+              else if (preco->PBH_ADAF_delta == 0.1){
+                Value_min = 9.4e-5;
+                Value_med = 5e-3;
+                Value_max = 6.6e-3;
+                if(M_b_dot/M_ed_dot <= Value_min){
+                  epsilon_0 = 0.12;
+                  a = 0.59;
+                }
+                else if(Value_min < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot  <= Value_med){
+                  epsilon_0 = 0.026;
+                  a = 0.27;
+                }
+                else if(Value_med < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot <= Value_max){
+                  epsilon_0 = 0.50;
+                  a = 4.53;
+                }
+                else{
+                  epsilon_0 = 0.1;
+                  a = 0.;
+                }
+                epsilon = epsilon_0 * pow(M_b_dot / M_crit,a);
+              }
+              else if (preco->PBH_ADAF_delta == 0.5){
+
+                Value_min = 2.9e-5;
+                Value_med = 3.3e-3;
+                Value_max = 5.3e-3;
+                if(M_b_dot/M_ed_dot <= Value_min){
+                  epsilon_0 = 1.58;
+                  a = 0.65;
+                }
+                else if(Value_min < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot  <= Value_med){
+                  epsilon_0 = 0.055;
+                  a = 0.076;
+                }
+                else if(Value_med < M_b_dot/M_ed_dot && M_b_dot/M_ed_dot <= Value_max){
+                  epsilon_0 = 0.17;
+                  a = 1.12;
+                }
+                else{
+                  epsilon_0 = 0.1;
+                  a = 0.;
+                }
+                epsilon = epsilon_0 * pow(M_b_dot / M_crit,a);
+              }
+
+              L_acc = epsilon*M_b_dot*_c_*_c_;
+
+            }
+          /** Spherical accretion from Ali-Haimoud et al. 1612.05644 */
+          else if(preco->PBH_accretion_recipe == spherical_accretion){
+            rho_cmb = pvecback[pba->index_bg_rho_g]/pow(_Mpc_over_m_,2)*3/8./_PI_/_G_*_c_*_c_*_c_*_c_* 6.241509e12; /* energy density in MeV/m^3 */
+            // x_e_infinity = 1; // change to 1 for the strong-feedback case
+            x_e_infinity = x_e; // change to x_e for the no-feedback case
+            v_B = sqrt((1+x_e_infinity)*T_infinity/m_p)*_c_; //sound speed.
+            if(preco->PBH_relative_velocities < 0.){
+              v_l = 30*MIN(1,z/1000)*1e3; // in m/s.
+              if(v_B < v_l) v_eff = sqrt(v_B*v_l);
+              else v_eff = v_B;
+            }
+            else{
+              v_l = preco->PBH_relative_velocities*1e3; // converted to m/s.
+              v_eff = pow(v_l*v_l+v_B*v_B,0.5);
+            }
+            r_B = _G_*preco->table_PBH_accreting_mass[index_M]*M_sun*pow(v_eff,-2); // in m
+            t_B = _G_*preco->table_PBH_accreting_mass[index_M]*M_sun/pow(v_eff,3); // in s
+            beta_compton_drag = 4./3*x_e_infinity*_sigma_*rho_cmb*t_B/(m_p)*_c_;
+            gamma_cooling = 2*m_p/(m_e*(1+x_e_infinity))*beta_compton_drag;
+            lambda_iso = 0.25*exp(1.5);
+            lambda_ad = 0.25*pow(3./5,1.5);
+            lambda_1 = lambda_ad+(lambda_iso-lambda_ad)*pow(gamma_cooling*gamma_cooling/(88+gamma_cooling*gamma_cooling),0.22);
+            lambda_2 = exp(4.5/(3+pow(beta_compton_drag,0.75)))*1/(pow(pow(1+beta_compton_drag,0.5)+1,2));
+            lambda = lambda_1*lambda_2/lambda_iso;
+            rho = pvecback[pba->index_bg_rho_b]/pow(_Mpc_over_m_,2)*3/8./_PI_/_G_*_c_*_c_; /* energy density in kg/m^3 */
+            M_b_dot = 4*_PI_*lambda*rho*r_B*r_B*v_eff; //in kg s^-1
+            T_ion = 1.5e4*_eV_over_Kelvin_;
+            tau_cooling = 1.5/(5+pow(gamma_cooling,2./3));
+            Y_s = pow((1+x_e_infinity)/2,2./3*13.6/T_ion)*tau_cooling/4*pow(1-5./2*tau_cooling,1./3)*m_p/m_e;
+            T_s = m_e * Y_s*pow(1+Y_s/0.27,-1./3); // in MeV
+            if(T_s/m_e > 1)  J = 27/(2*_PI_)*(log(2*T_s/(m_e)*exp(-0.577)+0.08)+4./3);
+            else J = 4/_PI_*sqrt(2/_PI_)*pow(T_s/m_e,-0.5)*(1+5.5*pow(T_s/m_e,1.25));
+            L_ed = 4*_PI_*_G_*preco->table_PBH_accreting_mass[index_M]*M_sun*m_p*1e6/_eV_over_joules_/(_sigma_*_c_);
+            L_acc = 1./137*T_s/(m_p)*J*pow(M_b_dot*_c_*_c_,2)/L_ed;
+           }
+
+            preco->energy_rate_at_mass[index_M] = (L_acc/preco->table_PBH_accreting_mass[index_M]);
+         //    preco->energy_rate_at_mass[index_M] = (rho_cdm_today/(preco->table_PBH_accreting_mass[index_M]*M_sun*_c_*_c_))*pow(1+z,3)*L_acc*preco->PBH_fraction;
+
+          if (isinf(preco->energy_rate_at_mass[index_M])==1) {
+            printf("energy_rate_at_mass is inf at z =%e\n",z);
+            exit(EXIT_FAILURE);
+          }
+
+  }
+  free(pvecback);
+
+  return _SUCCESS_;
 
 }
 
@@ -2853,6 +3353,8 @@ int thermodynamics_reionization(
 
   /** - allocate the vector of parameters defining the function \f$ X_e(z) \f$ */
 
+
+
   class_alloc(preio->reionization_parameters,preio->reio_num_params*sizeof(double),pth->error_message);
 
   /** (a) if reionization implemented like in CAMB */
@@ -2886,6 +3388,7 @@ int thermodynamics_reionization(
     class_test(preio->reionization_parameters[preio->index_helium_fullreio_width]==0,
                pth->error_message,
                "stop to avoid division by zero");
+
 
     /** - --> if reionization redshift given as an input, initialize the remaining values and fill reionization table*/
 
@@ -2927,6 +3430,7 @@ int thermodynamics_reionization(
                  pth->error_message,
                  pth->error_message);
 
+
       /* fill reionization table */
       class_call(thermodynamics_reionization_sample(ppr,pba,pth,preco,preio,pvecback),
                  pth->error_message,
@@ -2940,6 +3444,7 @@ int thermodynamics_reionization(
 
     if (pth->reio_z_or_tau == reio_tau) {
 
+
       /* upper value */
 
       z_sup = ppr->reionization_z_start_max-ppr->reionization_start_factor*pth->reionization_width;
@@ -2952,6 +3457,7 @@ int thermodynamics_reionization(
       /* maximum possible starting redshift */
       preio->reionization_parameters[preio->index_reio_start] = ppr->reionization_z_start_max;
       /* infer xe_before_reio */
+
       class_call(thermodynamics_get_xe_before_reionization(ppr,
                                                            pth,
                                                            preco,
@@ -2964,6 +3470,7 @@ int thermodynamics_reionization(
       class_call(thermodynamics_reionization_sample(ppr,pba,pth,preco,preio,pvecback),
                  pth->error_message,
                  pth->error_message);
+
 
       tau_sup=preio->reionization_optical_depth;
 
@@ -3489,6 +3996,10 @@ int thermodynamics_reionization_sample(
   /* running index inside thermodynamics table */
   int i,j;
   int number_of_redshifts;
+  // GFA
+  int k, index_M;
+  double energy_rate_dep_heat;
+
   /* values of z, dz, X_e */
   double dz,dz_max;
   double z,z_next;
@@ -3508,6 +4019,12 @@ int thermodynamics_reionization_sample(
   int last_index_back;
   double relative_variation;
   double L_x, rho_sfr;
+  double rho_cdm_today; // GFA
+  double M_sun = 2e30; // in Kg
+
+  rho_cdm_today = pow(pba->H0*_c_/_Mpc_over_m_,2)*3/8./_PI_/_G_*(pba->Omega0_cdm)*_c_*_c_; /* energy density in J/m^3 */
+
+
   Yp = pth->YHe;
 
   /** - (a) allocate vector of values related to reionization */
@@ -3517,6 +4034,8 @@ int thermodynamics_reionization_sample(
   class_call(gt_init(&gTable),
              gTable.error_message,
              pth->error_message);
+
+
 
   /** - (c) first line is taken from thermodynamics table, just before reionization starts */
 
@@ -3574,6 +4093,7 @@ int thermodynamics_reionization_sample(
 
   dkappadz = reio_vector[preio->index_re_dkappadz];
   dkappadtau = reio_vector[preio->index_re_dkappadtau];
+
 
   /** - --> get baryon temperature **/
   Tb = preco->recombination_table[i*preco->re_size+preco->index_re_Tb];
@@ -3710,6 +4230,7 @@ int thermodynamics_reionization_sample(
       // if(fabs(delta_z_old)>fabs(delta_z_new))j--;
 
     }
+
   }
 
   /** - (f) allocate reionization_table with correct size */
@@ -3795,14 +4316,22 @@ int thermodynamics_reionization_sample(
       (pba->T_cmb * (1.+z)-preio->reionization_table[i*preio->re_size+preio->index_re_Tb])/pvecback[pba->index_bg_H];
 
       /** - Parameters related to exotic energy injection */
-      if((pth->annihilation != 0 || pth->decay_fraction != 0 || pth->PBH_accreting_mass != 0 || pth->PBH_evaporating_mass != 0)){
+      if((pth->annihilation != 0 || pth->decay_fraction != 0 || pth->PBH_accreting_mass != 0 || pth->PBH_evaporating_mass != 0 || pth->has_extended_PBH_MassFunc == _TRUE_)){ // GFA
 
             /** - --> derivative of baryon temperature */
               preco->xe_tmp=preio->reionization_table[i*preio->re_size+preio->index_re_xe];
               preco->Tm_tmp=preio->reionization_table[i*preio->re_size+preio->index_re_Tb];
-              class_call(thermodynamics_energy_injection(ppr,pba,preco,z,&energy_rate,pth->error_message),
-                         pth->error_message,
-                         pth->error_message);
+
+              if (pth->has_extended_PBH_MassFunc == _TRUE_) { // GFA, compute energy injection per each pbh mass
+                class_call(thermodynamics_accreting_pbh_energy_injection_PBH_MF(ppr,pba,preco,z,pth->error_message),
+                           pth->error_message,
+                           pth->error_message);
+              } else {
+                class_call(thermodynamics_energy_injection(ppr,pba,preco,z,&energy_rate,pth->error_message),
+                           pth->error_message,
+                           pth->error_message);
+              }
+
 
               preco->z_tmp=z;
                /* coefficient as revised by Galli et al. 2013 (in fact it is an interpolation by Vivian Poulin of columns 1 and 2 in Table V of Slatyer et al. 2013) */
@@ -3813,10 +4342,17 @@ int thermodynamics_reionization_sample(
                  chi_heat = pth->chi_heat;
               }
                if(pth->energy_repart_coefficient==no_factorization){
-                 class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
-                          pth->error_message,
-                          pth->error_message);
-                 chi_heat = pth->chi_heat;
+                 if (pth->has_extended_PBH_MassFunc == _TRUE_) { // GFA, interpolate f(z) per channel and now also per each mass
+                   class_call(thermodynamics_annihilation_coefficients_interpolate_PBH_MF(ppr,pba,pth,z),
+                            pth->error_message,
+                            pth->error_message);
+                 } else {
+                   class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
+                            pth->error_message,
+                            pth->error_message);
+                   chi_heat = pth->chi_heat;
+                 }
+
               }
                /* old approximation from Chen and Kamionkowski */
                if(pth->energy_repart_coefficient==SSCK){
@@ -3825,9 +4361,27 @@ int thermodynamics_reionization_sample(
 
               chi_heat= MIN(chi_heat,1.);
               chi_heat = MAX(chi_heat,0.);
+              if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+              for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+              pth->chi_heat_at_mass[index_M]= MIN(pth->chi_heat_at_mass[index_M],1.);
+              pth->chi_heat_at_mass[index_M] = MAX(pth->chi_heat_at_mass[index_M],0.);
+              }
+              }
 
+              if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+               for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) { // GFA, evaluate integrand at each mass
+                 pth->ener_rate_dep_heat_per_mass[index_M] = pth->table_PBH_MassFunc[index_M]*pth->chi_heat_at_mass[index_M]*preco->energy_rate_at_mass[index_M];
+               }
+               energy_rate_dep_heat = 0.;
+               for (k=0; k < pth->num_PBH_accreting_mass-1; k++) { //integral over the mass using trapezoidal rule, improve to Simpson, although with at least 50 mass bins it shouldn't matter
+                 energy_rate_dep_heat += 0.5*(pth->table_PBH_accreting_mass[k+1]-pth->table_PBH_accreting_mass[k])*(pth->ener_rate_dep_heat_per_mass[k]+pth->ener_rate_dep_heat_per_mass[k+1]);
+               }
+                energy_rate_dep_heat *= preco->PBH_fraction*(rho_cdm_today/(M_sun*_c_*_c_))*pow(1+z,3);
+             } else { //standard case, no integral required
+                energy_rate_dep_heat = energy_rate*chi_heat;
+               }
 
-              dTdz_DM = - 2./(3.*_k_B_)*energy_rate*chi_heat
+              dTdz_DM = - 2./(3.*_k_B_)*energy_rate_dep_heat
               /(preco->Nnow*pow(1.+z,3))/(1.+preco->fHe+preio->reionization_table[i*preio->re_size+preio->index_re_xe])
               /(pvecback[pba->index_bg_H]*_c_/_Mpc_over_m_*(1.+z)); /* energy injection */
 
@@ -3865,6 +4419,7 @@ int thermodynamics_reionization_sample(
 
         preio->reionization_table[(i-1)*preio->re_size+preio->index_re_Tb] =
           preio->reionization_table[i*preio->re_size+preio->index_re_Tb]-dTdz*dz;
+
       }
 
 
@@ -3873,7 +4428,9 @@ int thermodynamics_reionization_sample(
     preio->reionization_table[(i-1)*preio->re_size+preio->index_re_cb2] = _k_B_/ ( _c_ * _c_ * mu)
       * preio->reionization_table[(i-1)*preio->re_size+preio->index_re_Tb]
       *(1.+(1+z)/3.*dTdz/preio->reionization_table[(i-1)*preio->re_size+preio->index_re_Tb]);
+
   }
+
 
   /** - --> spline \f$ d \tau / dz \f$ with respect to z in view of integrating for optical depth */
   class_call(array_spline(preio->reionization_table,
@@ -3898,6 +4455,7 @@ int thermodynamics_reionization_sample(
                                         pth->error_message),
              pth->error_message,
              pth->error_message);
+
 
   return _SUCCESS_;
 
@@ -4247,6 +4805,11 @@ class_stop(pth->error_message,
            hyrec_data.cosmo->inj_params->f_eff = pth->f_eff;
            hyrec_data.cosmo->inj_params->ann_f_halo = pth->annihilation_f_halo;
            hyrec_data.cosmo->inj_params->ann_z_halo = pth->annihilation_z_halo;
+           // GFA
+           hyrec_data.cosmo->inj_params->has_UCMH_spike = pth->has_UCMH_spike;
+           hyrec_data.cosmo->inj_params->Number_z =ppr->Number_z;
+           hyrec_data.cosmo->inj_params->z_table_for_boost = pth->z_table_for_boost;
+           hyrec_data.cosmo->inj_params->boost_table = pth->boost_table;
            hyrec_data.cosmo->inj_params->annihil_coef_num_lines = pth->annihil_coef_num_lines;
            hyrec_data.cosmo->inj_params->annihil_coef_xe = pth->annihil_coef_xe;
            hyrec_data.cosmo->inj_params->annihil_coef_heat = pth->annihil_coef_heat;
@@ -4333,6 +4896,9 @@ class_stop(pth->error_message,
    preco->decay_fraction = pth->decay_fraction;
    preco->annihilation_f_halo = pth->annihilation_f_halo;
    preco->annihilation_z_halo = pth->annihilation_z_halo;
+   preco->has_UCMH_spike = pth->has_UCMH_spike; // GFA
+   preco->boost_table = pth->boost_table;
+   preco->z_table_for_boost = pth->z_table_for_boost;
    pth->n_e=preco->Nnow;
 
    /** - allocate memory for thermodynamics interpolation tables (size known in advance) and fill it */
@@ -4457,11 +5023,17 @@ int fill_recombination_structure(struct precision * ppr,
   preco->fHe = preco->YHe/(_not4_ *(1.-preco->YHe)); /* recfast 1.4 */
   preco->Nnow = 3.*preco->H0*preco->H0*pba->Omega0_b/(8.*_PI_*_G_*mu_H*_m_H_);
 
+  if (pth->has_extended_PBH_MassFunc == _TRUE_) { // GFA, allocate energy injections per each mass
+   class_alloc(preco->energy_rate_at_mass,pth->num_PBH_accreting_mass*sizeof(double),pth->error_message);
+  }
+
   /* energy injection parameters */
   preco->annihilation = pth->annihilation;
   preco->has_on_the_spot = pth->has_on_the_spot;
   preco->decay_fraction = pth->decay_fraction;
   preco->PBH_accreting_mass = pth->PBH_accreting_mass;
+  preco->table_PBH_accreting_mass = pth->table_PBH_accreting_mass; // GFA
+  preco->num_PBH_accreting_mass = pth->num_PBH_accreting_mass; // GFA
   preco->PBH_ADAF_delta = pth->PBH_ADAF_delta;
   preco->PBH_accretion_eigenvalue = pth->PBH_accretion_eigenvalue;
   preco->PBH_relative_velocities = pth->PBH_relative_velocities;
@@ -4481,6 +5053,10 @@ int fill_recombination_structure(struct precision * ppr,
   preco->annihilation_f_halo = pth->annihilation_f_halo;
   preco->annihilation_z_halo = pth->annihilation_z_halo;
   preco->f_eff = pth->f_eff;
+  preco->has_UCMH_spike = pth->has_UCMH_spike; //GFA
+  preco->boost_table = pth->boost_table;
+  preco->z_table_for_boost = pth->z_table_for_boost;
+
 
   /* quantities related to constants defined in thermodynamics.h */
   //n = preco->Nnow * pow((1.+z),3);
@@ -4759,7 +5335,7 @@ int thermodynamics_recombination_with_recfast(
 
       y[0] = MIN(x_H0,1);   //security added by VP: y[0] is only the hydrogen contribution and cannot be greater than 1
 
-      if (pth->thermodynamics_verbose > 1) {
+      if (pth->thermodynamics_verbose > 2) {
         fprintf(stdout, "in function thermodynamics_recombination_with_recfast, fifth approximation : zend %e y[0] %e\n",zend, y[0]);
       }
       /* smoothed transition */
@@ -4822,7 +5398,7 @@ int thermodynamics_recombination_with_recfast(
       }
 
         // x0 = y[0] + preco->fHe*y[1];
-        if(pth->thermodynamics_verbose>1){
+        if(pth->thermodynamics_verbose>2){
           fprintf(stdout, "in function thermodynamics_recombination_with_recfast, full calculation zend %e x0 %e y[0] %e\n",zend, x0, y[0]);
         }
 
@@ -4941,6 +5517,10 @@ int thermodynamics_derivs_with_recfast(
   double C;
   //double C_He;
   double energy_rate;
+  // GFA
+  double energy_rate_dep_ion;
+  double energy_rate_dep_lya;
+  double energy_rate_dep_heat;
 
   double tau;
   double chi_heat;
@@ -4952,6 +5532,11 @@ int thermodynamics_derivs_with_recfast(
    /*used for reionization from realistic star model*/
   double rho_sfr,stars_xe,dNion_over_dt,L_x;
 
+  int index_M; // GFA
+  int i;
+  double rho_cdm_today;
+  double M_sun = 2e30; // in Kg
+
   ptpaw = parameters_and_workspace;
   ppr = ptpaw->ppr;
   pba = ptpaw->pba;
@@ -4959,6 +5544,8 @@ int thermodynamics_derivs_with_recfast(
   preco = ptpaw->preco;
   pvecback = ptpaw->pvecback;
   rho_sfr = pth->ap*pow(1+z,pth->bp)/(1+pow((1+z)/pth->cp,pth->dp))/pow(_Mpc_over_m_,3)*pow(1+z,3)*(1+tanh((pth->z_start_reio_stars-z)))/2;//add a (sharp) smoothing function.
+
+  rho_cdm_today = pow(pba->H0*_c_/_Mpc_over_m_,2)*3/8./_PI_/_G_*(pba->Omega0_cdm)*_c_*_c_; /* energy density in J/m^3 */
 
   /* security added by Vivian Poulin to avoid bug when dealing with energy injection modifying ionisation history */
   x_H = MIN(y[0],1.);
@@ -4993,21 +5580,38 @@ int thermodynamics_derivs_with_recfast(
              pba->error_message,
              error_message);
 
-   if((pth->annihilation!=0 || pth->decay_fraction!=0 || pth->PBH_accreting_mass!=0 || pth->PBH_evaporating_mass != 0)){
+   if((pth->annihilation!=0 || pth->decay_fraction!=0 || pth->PBH_accreting_mass!=0 || pth->PBH_evaporating_mass != 0 || pth->has_extended_PBH_MassFunc == _TRUE_)){ // GFA
      preco->xe_tmp=x;
      preco->Tm_tmp=Tmat;
 
         if( z > 2){//sometimes problem with interpolation
-          // fprintf(stdout, "z %e,Tmat %e, x %e\n",z,Tmat,x);
-        class_call(thermodynamics_energy_injection(ppr,pba,preco,z,&energy_rate,error_message),
-                   error_message,
-                   error_message);
-        // fprintf(stdout, "energy_rate %e\n",energy_rate);
+
+          if (pth->has_extended_PBH_MassFunc == _TRUE_) { // GFA, compute energy injection for each mass
+            class_call(thermodynamics_accreting_pbh_energy_injection_PBH_MF(ppr,pba,preco,z,error_message),
+                       error_message,
+                       error_message);
+
+          } else {
+            class_call(thermodynamics_energy_injection(ppr,pba,preco,z,&energy_rate,error_message),
+                       error_message,
+                       error_message);
+          }
+
         }
-        else energy_rate = 0;
-           preco->z_tmp=z;
+        else {
+          energy_rate = 0;
+          if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+          for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+          preco->energy_rate_at_mass[index_M] =  0.;
+          }
+          }
+
+        }
+    preco->z_tmp=z;
+    } else {
+      energy_rate=0;
     }
-    else energy_rate=0;
+
  // fprintf(stdout,"%e      %e     %e      %e      %e    \n", x,pth->chi_heat,pth->chi_lya, pth->chi_ionH,pth->chi_ionHe,pth->chi_lowE);
   /* Hz is H in inverse seconds (while pvecback returns [H0/c] in inverse Mpcs) */
   Hz=pvecback[pba->index_bg_H]* _c_ / _Mpc_over_m_;
@@ -5103,7 +5707,7 @@ int thermodynamics_derivs_with_recfast(
       chi_ionHe = 0.;
       chi_lya = 0.;
 
-    if(preco->annihilation > 0 || preco->decay_fraction > 0 || preco->PBH_accreting_mass > 0 || preco->PBH_evaporating_mass > 0){
+    if(preco->annihilation > 0 || preco->decay_fraction > 0 || preco->PBH_accreting_mass > 0 || preco->PBH_evaporating_mass > 0 || pth->has_extended_PBH_MassFunc == _TRUE_){
       if (x < 1.){
         /* coefficient as revised by Galli et al. 2013 (in fact it is an interpolation by Vivian Poulin of Table V of Galli et al. 2013) */
         if(pth->energy_repart_coefficient==GSVI|| pth->energy_repart_coefficient ==chi_from_file){
@@ -5116,13 +5720,19 @@ int thermodynamics_derivs_with_recfast(
 
         }
         if(pth->energy_repart_coefficient==no_factorization){
-          class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
-                         error_message,
-                         error_message);
-          chi_ionH = pth->chi_ionH;
-          chi_ionHe = pth->chi_ionHe;
-          chi_lya = pth->chi_lya;
-          // fprintf(stdout, "%e %e %e %e %e\n",z,chi_ionH,chi_lya,pth->chi_heat,(chi_ionH+chi_ionHe+chi_lya+pth->chi_heat));
+          if (pth->has_extended_PBH_MassFunc == _TRUE_){ // GFA, interpolate functions f(z) per channel and now also per each mass
+            class_call(thermodynamics_annihilation_coefficients_interpolate_PBH_MF(ppr,pba,pth,z),
+                           error_message,
+                           error_message);
+          } else {
+            class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
+                           error_message,
+                           error_message);
+            chi_ionH = pth->chi_ionH;
+            chi_ionHe = pth->chi_ionHe;
+            chi_lya = pth->chi_lya;
+          }
+
         }
         /* old approximation from Chen and Kamionkowski */
         if(pth->energy_repart_coefficient==SSCK){
@@ -5137,12 +5747,31 @@ int thermodynamics_derivs_with_recfast(
         chi_ionH = MAX(chi_ionH,0.);
         chi_ionHe = MAX(chi_ionHe,0.);
         chi_lya = MAX(chi_lya,0.);
+        if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+        for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+        pth->chi_ionH_at_mass[index_M] = MIN(pth->chi_ionH_at_mass[index_M],1.);
+        pth->chi_ionHe_at_mass[index_M] = MIN(pth->chi_ionHe_at_mass[index_M],1.);
+        pth->chi_lya_at_mass[index_M] = MIN(pth->chi_lya_at_mass[index_M],1.);
+        pth->chi_ionH_at_mass[index_M] = MAX(pth->chi_ionH_at_mass[index_M],0.);
+        pth->chi_ionHe_at_mass[index_M] = MAX(pth->chi_ionHe_at_mass[index_M],0.);
+        pth->chi_lya_at_mass[index_M] = MAX(pth->chi_lya_at_mass[index_M],0.);
+        }
+        }
 
       }
       else {
         chi_ionH = 0.;
         chi_ionHe = 0.;
         chi_lya = 0.;
+
+        if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+        for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+        pth->chi_ionH_at_mass[index_M] = 0.;
+        pth->chi_ionHe_at_mass[index_M] = 0.;
+        pth->chi_lya_at_mass[index_M] = 0.;
+        }
+        }
+
       }
       if(pth->thermodynamics_verbose>10){
         fprintf(stdout, "chi_ionH %e chi_ionHe %e chi_lya %e z% e\n", chi_ionH , chi_ionHe, chi_lya, z);
@@ -5160,10 +5789,31 @@ int thermodynamics_derivs_with_recfast(
       C = 1.;
 
       }
+
+      if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+       for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) { // evaluate the integrand per each mass
+         pth->ener_rate_dep_ion_per_mass[index_M] = pth->table_PBH_MassFunc[index_M]*(pth->chi_ionH_at_mass[index_M]+pth->chi_ionHe_at_mass[index_M])*preco->energy_rate_at_mass[index_M];
+         pth->ener_rate_dep_lya_per_mass[index_M] = pth->table_PBH_MassFunc[index_M]*pth->chi_lya_at_mass[index_M]*preco->energy_rate_at_mass[index_M];
+       }
+
+       energy_rate_dep_ion = 0.;
+       energy_rate_dep_lya = 0.;
+       for (i=0; i < pth->num_PBH_accreting_mass-1; i++) { //integrate over the mass using trapezoidal integral, improve to consider Simpson, although with at least 50 mass bins it shouldn't matter
+         energy_rate_dep_ion += 0.5*(pth->table_PBH_accreting_mass[i+1]-pth->table_PBH_accreting_mass[i])*(pth->ener_rate_dep_ion_per_mass[i]+pth->ener_rate_dep_ion_per_mass[i+1]);
+         energy_rate_dep_lya += 0.5*(pth->table_PBH_accreting_mass[i+1]-pth->table_PBH_accreting_mass[i])*(pth->ener_rate_dep_lya_per_mass[i]+pth->ener_rate_dep_lya_per_mass[i+1]);
+       }
+       energy_rate_dep_ion *= preco->PBH_fraction*(rho_cdm_today/(M_sun*_c_*_c_))*pow(1+z,3);
+       energy_rate_dep_lya *= preco->PBH_fraction*(rho_cdm_today/(M_sun*_c_*_c_))*pow(1+z,3);
+
+     } else { // standard case, just one mass or one energy injection
+        energy_rate_dep_ion = energy_rate*(chi_ionH+chi_ionHe);
+        energy_rate_dep_lya = energy_rate*chi_lya;
+      }
+
       /* evolution of hydrogen ionisation fraction: */
 
       dy[0] = (x*x_H*n*Rdown - Rup_2*(1.-x_H)*exp(-preco->CL/Tmat)) * C / (Hz*(1.+z))       /* Peeble's equation with fudged factors */
-            -energy_rate/n*((chi_ionH+chi_ionHe)/_L_H_ion_+chi_lya*(1.-C)/_L_H_alpha_)/(_h_P_*_c_*Hz*(1.+z)); /* energy injection (neglect fraction going to helium) */
+            -(energy_rate_dep_ion/(_L_H_ion_*n)+energy_rate_dep_lya*(1.-C)/(_L_H_alpha_*n))/(_h_P_*_c_*Hz*(1.+z)); /* energy injection (neglect fraction going to helium) */
 
       // dy[0] = -5.89e-5*sqrt(Tmat/1e4)*exp(-1.58e5/Tmat)*(1-x_H)*x/ (Hz*(1.+z)) * 1e-6;     // Collisional ionisation, taken from 1503.04827, last factor is for conversion cm^3->m^3
 
@@ -5233,7 +5883,7 @@ int thermodynamics_derivs_with_recfast(
   else {
     /* equations modified to take into account energy injection from dark matter */
 
-    if(pth->annihilation >0 || pth->decay_fraction > 0 || pth->PBH_accreting_mass > 0 || pth->PBH_evaporating_mass > 0){
+    if(pth->annihilation >0 || pth->decay_fraction > 0 || pth->PBH_accreting_mass > 0 || pth->PBH_evaporating_mass > 0 || pth->has_extended_PBH_MassFunc == _TRUE_){
       if (x < 1.){
         /* coefficient as revised by Galli et al. 2013 (in fact it is an interpolation by Vivian Poulin of columns 1 and 2 in Table V of Galli et al. 2013) */
         if(pth->energy_repart_coefficient==GSVI|| pth->energy_repart_coefficient ==chi_from_file){
@@ -5243,28 +5893,61 @@ int thermodynamics_derivs_with_recfast(
             chi_heat = pth->chi_heat;
         }
         if(pth->energy_repart_coefficient==no_factorization){
-          class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
-                        error_message,
-                        error_message);
-            chi_heat = pth->chi_heat;
+          if (pth->has_extended_PBH_MassFunc == _TRUE_){  // GFA, interpolate functions f(z) per channel and now also per each mass
+            class_call(thermodynamics_annihilation_coefficients_interpolate_PBH_MF(ppr,pba,pth,z),
+                          error_message,
+                          error_message);
+          } else {
+            class_call(thermodynamics_annihilation_coefficients_interpolate(ppr,pba,pth,z),
+                          error_message,
+                          error_message);
+              chi_heat = pth->chi_heat;
+          }
+
+
         }
         /* old approximation from Chen and Kamionkowski */
         if(pth->energy_repart_coefficient==SSCK){
             chi_heat = (1.+2.*x)/3.;
         }
 
-      }
-      else
-        chi_heat = 1.;
+      } else {
 
+        chi_heat = 1.;
+        if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+        for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+        pth->chi_heat_at_mass[index_M] = 1.;
+        }
+        }
+
+      }
         chi_heat= MIN(chi_heat,1.);
         chi_heat = MAX(chi_heat,0.);
-      // fprintf(stdout, "z %e chi_heat %e chi_heat_old %e xe %e\n",z ,chi_heat,(1.+2.*x)/3., x);
+        if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+        for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+        pth->chi_heat_at_mass[index_M]= MIN(pth->chi_heat_at_mass[index_M],1.);
+        pth->chi_heat_at_mass[index_M] = MAX(pth->chi_heat_at_mass[index_M],0.);
+        }
+        }
+
+    } else {
+      chi_heat = 0.;
     }
-    else chi_heat = 0.;
     dTdz_adia=2.*Tmat/(1.+z);
     dTdz_CMB = preco->CT * pow(Trad,4) * x / (1.+x+preco->fHe) * (Tmat-Trad) / (Hz*(1.+z));
-    dTdz_DM = -2./(3.*_k_B_)*energy_rate*chi_heat/n/(1.+preco->fHe+x)/(Hz*(1.+z));
+    if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+     for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) { // evaluate integrand at each mass
+       pth->ener_rate_dep_heat_per_mass[index_M] = pth->table_PBH_MassFunc[index_M]*pth->chi_heat_at_mass[index_M]*preco->energy_rate_at_mass[index_M];
+     }
+     energy_rate_dep_heat = 0.;
+     for (i=0; i < pth->num_PBH_accreting_mass-1; i++) { //GFA, integrate over mass using trapezoidal rule, improve to simpson, although with at least 50 mass bins it shouldn't matter
+       energy_rate_dep_heat += 0.5*(pth->table_PBH_accreting_mass[i+1]-pth->table_PBH_accreting_mass[i])*(pth->ener_rate_dep_heat_per_mass[i]+pth->ener_rate_dep_heat_per_mass[i+1]);
+     }
+     energy_rate_dep_heat *= preco->PBH_fraction*(rho_cdm_today/(M_sun*_c_*_c_))*pow(1+z,3);
+   } else { // standard case with single mass or single energy injection
+     energy_rate_dep_heat = energy_rate*chi_heat;
+     }
+    dTdz_DM = -2./(3.*_k_B_)*energy_rate_dep_heat/n/(1.+preco->fHe+x)/(Hz*(1.+z));
     if(pth->star_heating_parametrization == heating_stars_sfr_source_term){
     L_x = 2*pth->Ex * pth->fx * rho_sfr/(3*_k_B_*n*Hz*(1.+z)*(1.+x+preco->fHe));
     dTdz_stars = -L_x*(1+2*x)/3.;
@@ -5279,6 +5962,8 @@ int thermodynamics_derivs_with_recfast(
 
     // dy[2] += 5.89e-5*sqrt(Tmat/1e4)*exp(-1.58e5/Tmat)*(1-x_H)*x/ (Hz*(1.+z)) * 1e-6;
   }
+
+
 
   return _SUCCESS_;
 }
@@ -5306,6 +5991,7 @@ int thermodynamics_merge_reco_and_reio(
   /** - define local variables */
 
   int i,index_th,index_re;
+  int index_M;
 
   /** - first, a little check that the two tables match each other and can be merged */
 
@@ -5326,6 +6012,7 @@ int thermodynamics_merge_reco_and_reio(
   class_alloc(pth->z_table,pth->tt_size*sizeof(double),pth->error_message);
   class_alloc(pth->thermodynamics_table,pth->th_size*pth->tt_size*sizeof(double),pth->error_message);
   class_alloc(pth->d2thermodynamics_dz2_table,pth->th_size*pth->tt_size*sizeof(double),pth->error_message);
+
 
   /** - fill these arrays */
 
@@ -5380,6 +6067,50 @@ int thermodynamics_merge_reco_and_reio(
     pth->PBH_table_is_initialized == _FALSE_;
   }
 
+  if (pth->has_extended_PBH_MassFunc == _TRUE_) {
+    // GFA: free all the matrices and vectors that have been allocated
+    for (index_M=0; index_M < pth->num_PBH_accreting_mass; index_M++) {
+      free(pth->annihil_coef_xe_at_mass[index_M]);
+      free(pth->annihil_coef_heat_at_mass[index_M]);
+      free(pth->annihil_coef_lya_at_mass[index_M]);
+      free(pth->annihil_coef_ionH_at_mass[index_M]);
+      free(pth->annihil_coef_ionHe_at_mass[index_M]);
+      free(pth->annihil_coef_lowE_at_mass[index_M]);
+      free(pth->annihil_coef_dd_heat_at_mass[index_M]);
+      free(pth->annihil_coef_dd_lya_at_mass[index_M]);
+      free(pth->annihil_coef_dd_ionH_at_mass[index_M]);
+      free(pth->annihil_coef_dd_ionHe_at_mass[index_M]);
+      free(pth->annihil_coef_dd_lowE_at_mass[index_M]);
+    }
+
+    free(pth->annihil_coef_xe_at_mass);
+    free(pth->annihil_coef_heat_at_mass);
+    free(pth->annihil_coef_lya_at_mass);
+    free(pth->annihil_coef_ionH_at_mass);
+    free(pth->annihil_coef_ionHe_at_mass);
+    free(pth->annihil_coef_lowE_at_mass);
+    free(pth->annihil_coef_dd_heat_at_mass);
+    free(pth->annihil_coef_dd_lya_at_mass);
+    free(pth->annihil_coef_dd_ionH_at_mass);
+    free(pth->annihil_coef_dd_ionHe_at_mass);
+    free(pth->annihil_coef_dd_lowE_at_mass);
+
+    free(pth->table_PBH_accreting_mass);
+    free(pth->table_PBH_MassFunc);
+    free(pth->chi_heat_at_mass);
+    free(pth->chi_lya_at_mass);
+    free(pth->chi_ionH_at_mass);
+    free(pth->chi_ionHe_at_mass);
+    free(pth->chi_lowE_at_mass);
+    free(pth->annihil_coef_num_lines_at_mass);
+    free(preco->energy_rate_at_mass);
+
+    free(pth->ener_rate_dep_ion_per_mass);
+    free(pth->ener_rate_dep_lya_per_mass);
+    free(pth->ener_rate_dep_heat_per_mass);
+
+  }
+
   return _SUCCESS_;
 }
 
@@ -5407,6 +6138,8 @@ int thermodynamics_output_titles(struct background * pba,
   class_store_columntitle(titles,"tau_d",_TRUE_);
   //class_store_columntitle(titles,"max. rate",_TRUE_);
   class_store_columntitle(titles,"r_d",pth->compute_damping_scale);
+  class_store_columntitle(titles,"boost",pth->has_UCMH_spike); //GFA
+
 
   return _SUCCESS_;
 }
@@ -5420,6 +6153,7 @@ int thermodynamics_output_data(struct background * pba,
   int index_z, storeidx;
   double *dataptr, *pvecthermo;
   double z,tau;
+  double boost_at_z;
 
   //  pth->number_of_thermodynamics_titles = get_number_of_titles(pth->thermodynamics_titles);
   //pth->size_thermodynamics_data = pth->number_of_thermodynamics_titles*pth->tt_size;
@@ -5456,6 +6190,15 @@ int thermodynamics_output_data(struct background * pba,
     //class_store_double(dataptr,pvecthermo[pth->index_th_rate],_TRUE_,storeidx);
     class_store_double(dataptr,pvecthermo[pth->index_th_r_d],pth->compute_damping_scale,storeidx);
 
+    if (pth->has_UCMH_spike == _TRUE_) { //GFA
+      if (z>1.e-3) {
+        boost_at_z = array_interpolate_linear_simpler(pth->z_table_for_boost,pth->Number_z,pth->boost_table,z); //check ppr->Number_z
+      } else {
+        boost_at_z = pth->boost_table[0];
+      }
+    class_store_double(dataptr,boost_at_z,_TRUE_,storeidx);
+    }
+
   }
 
   return _SUCCESS_;
@@ -5471,4 +6214,380 @@ int thermodynamics_tanh(double x,
   *result = before + (after-before)*(tanh((x-center)/width)+1.)/2.;
 
   return _SUCCESS_;
+}
+
+//GFA
+int compute_boost_NFW_UCMH(
+                           struct precision *  ppr,
+                           struct background * pba,
+                           struct thermo * pth
+                          ) {
+
+ struct halos_workspace params;
+ double M_step, Mass_thres, M;
+ double z_step, z;
+ int index_z;
+ int index_M;
+ double rho_m_0, H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double nu, nu_prime, nu_fnu, Delta_crit_of_z, c_spike, rho_c_over_rho_m;
+ double a = 0.707,p= 0.3, A=0.322;      /* corresponds to Sheth-Tormen */
+ double sigma2_standard=0., sigma2_spike=0., sigma2_tot=0.;
+ double boost_low_mass, boost_high_mass, boost_spike;
+
+ params.ppr = ppr;
+ params.pba = pba;
+ params.pth = pth;
+
+ rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2);  /* present matter density in units of M_sol/Mpc^3 */
+ Mass_thres = 6.*pow(_PI_,2)*pow(pth->k_spike,-3)*rho_m_0;
+
+ if (pth->thermodynamics_verbose > 0) {
+   printf("Computing boost factor for spiky primordial spectrum \n");
+ }
+
+
+ class_test((Mass_thres < pth->Mass_min),
+            pth->error_message,
+            "Mass_thres =%e is smaller than Mass_min =%e, this should never happen",Mass_thres, pth->Mass_min);
+
+ sigma2_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+ sigma2_standard = integrate_simpson(ppr->k_min, pth->k_spike ,ppr->Number_k, LOG, integrand_for_sigma2, &params);
+ sigma2_tot = sigma2_spike + sigma2_standard;
+
+ z_step=(log10(ppr->z_max)-log10(ppr->z_min))/(ppr->Number_z);
+
+ for (index_z=0; index_z <=ppr->Number_z; index_z++) {
+  z = ppr->z_min*pow(10,index_z*z_step);
+  pth->z_table_for_boost[index_z] = z;
+  params.z = z;
+  rho_c_over_rho_m = 1. + pba->Omega0_lambda/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3.));
+  //Compute high-mass contribution
+  boost_high_mass  = integrate_simpson(Mass_thres, ppr->Mass_max ,ppr->Number_M, LOG, integrand_boost_high_mass,&params);
+  boost_high_mass *= (pth->Delta_c*rho_c_over_rho_m/3.);
+  //Compute low-mass contribution
+  Delta_crit_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
+  nu = pow(Delta_crit_of_z,2)/sigma2_tot;
+  nu_prime = a*nu;
+  nu_fnu = A*(1.+1./pow(nu_prime,p))*sqrt(nu_prime/(2.*_PI_))*exp(-nu_prime/2.);
+  c_spike = c_UCMH(Mass_thres, &params);
+  boost_spike =  (nu_fnu/sigma2_tot)*(4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*T_Hu(pth->k_spike,pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*f_UCMH(c_spike, Mass_thres, &params);
+  boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
+  boost_low_mass += boost_spike;
+  boost_low_mass  *= (pth->Delta_c*rho_c_over_rho_m/3.);
+  // add up the two contributions
+  pth->boost_table[index_z] = 1.+boost_high_mass+boost_low_mass;
+  // NOTE: this expression is still neglecting possible effects due to mergers
+ }
+
+ return _SUCCESS_;
+}
+
+
+/* required for CDM piece of transfer function, defined below */
+double T0_tilde(double k,
+                double alpha,
+                double beta,
+                struct background * pba) {
+double C;
+double q = k/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h); /* k needs to be passed in Mpc^{-1} */
+C = (14.2/alpha) + 386./(1.+69.9*pow(q,1.08));
+return log(exp(1.)+1.8*beta*q)/(log(exp(1.)+1.8*beta*q)+C*pow(q,2));
+}
+
+/* required for baryon piece of transfer function, defined below */
+double G(double y) {
+return y*(-6.*sqrt(1+y)+(2.+3.*y)*log((sqrt(1.+y)+1.)/(sqrt(1.+y)-1.)));
+}
+
+/* define TRANSFER FUNCTION as given by Eisenstein-Hu 1998 (arXiv: 9709112) */
+double T_Hu(double k,
+            struct background * pba) {
+/* k needs to be passed in Mpc^{-1} */
+double z_eq, k_eq, z_d;
+double b1, b2, b11, b22, a1, a2, alpha_c, beta_c;
+double T_b, T_c, f;
+double R_d, R_eq, s, k_silk;
+double beta_node, alpha_b, beta_b, s_tilde;
+double omega_m, omega_b;
+omega_m = (pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h;
+omega_b = pba->Omega0_b*pba->h*pba->h;
+z_eq = (2.5e4)*omega_m;
+k_eq = (7.46e-2)*omega_m;
+b1 = 0.313*pow(omega_m,-0.419)*(1.+0.607*pow(omega_m,0.674));
+b2 = 0.238*pow(omega_m,0.223);
+z_d = 1291*(pow(omega_m,0.251)/(1.+0.659*pow(omega_m,0.828)))*(1.+b1*pow(omega_b,b2));
+R_d = 31.5*omega_b*pow(z_d/1000.,-1);
+R_eq = 31.5*omega_b*pow(z_eq/1000.,-1);
+s = (2./(3.*k_eq))*sqrt(6./R_eq)*log((sqrt(1.+R_d)+sqrt(R_d+R_eq))/(1.+sqrt(R_eq)));
+k_silk = 1.6*pow(omega_b,0.52)*pow(omega_m,0.73)*(1.+pow(10.4*omega_m,-0.95)); // in units of Mpc^{-1}
+b11 = 0.944*pow(1.+ pow(458.*omega_m, -0.708),-1);
+b22 = pow(0.395*omega_m,-0.0266);
+beta_c = pow(1.+b11*(pow((omega_m-omega_b)/omega_m,b22)-1.),-1);
+a1 = pow(46.9*omega_m, 0.670)*(1.+pow(32.1*omega_m, -0.532));
+a2 = pow(12.0*omega_m, 0.424)*(1.+pow(45.0*omega_m, -0.582));
+alpha_c  = pow(a1,-omega_b/omega_m)*pow(a2,-pow(omega_b/omega_m,3));
+f = 1./(1.+pow(k*s/5.4,4));
+T_c  = f*T0_tilde(k,1.,beta_c,pba) + (1.-f)*T0_tilde(k,alpha_c,beta_c,pba);
+beta_node = 8.41*pow(omega_m,0.435);
+s_tilde = s*pow(1.+pow(beta_node/(k*s),3),-1./3.);
+beta_b = 0.5+(omega_b/omega_m)+(3.-2.*omega_b/omega_m)*sqrt(pow(17.2*omega_m,2)+1.);
+alpha_b = 2.07*k_eq*s*pow(1.+R_d, -3./4.)*G((1.+z_eq)/(1.+z_d));
+T_b = (T0_tilde(k,1.,1.,pba)/(1.+pow(k*s/5.2,2)) + (alpha_b/(1.+pow(beta_b/(k*s),3)))*exp(-pow(k/k_silk,1.4)))*sin(k*s_tilde)/(k*s_tilde);
+return (omega_b/omega_m)*T_b + ((omega_m-omega_b)/omega_m)*T_c;
+}
+
+
+double integrand_for_sigma2(void * params,
+                            double k) { /* Notice we are not considering the z-dependence here, it has been factored-out */
+ struct halos_workspace * params_local;
+ struct background * pba;
+ struct thermo * pth;
+ double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double transfer, primordial;
+ double cut_off = 1.;
+ params_local = params;
+ pba = params_local->pba;
+ pth = params_local->pth;
+ /* Ratio of matter spectrum and primordial spectrum, as given in Dodelson's book */
+  transfer = (4.0/25.0)*pow(pow(k,2)*T_Hu(k, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
+ /* select the primordial spectrum  */
+  primordial = pth->A_s*pow(cut_off,2)*pow(k/pth->k_pivot ,pth->n_s-1.);
+
+ return primordial*transfer/k;
+
+}
+
+
+double integrand_boost_high_mass(void * params,
+                                 double M) {
+  struct halos_workspace * params_local;
+  double c, integrand;
+  params_local = params;
+  c = c_NFW(M, params_local);
+  integrand = M*halo_function_high_mass(params_local, M)*f_NFW(c);
+  return integrand;
+}
+
+/* define function of concentration appearing for NFW profiles */
+double f_NFW(double c) {
+ return (1./3.)*pow(c,3)*(1.-pow(1.+c,-3))*pow(log(1.+c)-c*pow(1.+c,-1),-2);
+}
+
+/* define concentration function using prescription à la Macciò et al. (arXiv:0805.1926)*/
+double c_NFW(double M,
+             void * params) {
+  /* M needs to be passed in units of solar masses */
+struct halos_workspace * params_local;
+struct background * pba;
+double k_200=3.9, zF, z;
+params_local = params;
+pba = params_local->pba;
+zF  = zF_wo_spike(params_local, 0.01*M);
+z = params_local->z;
+return k_200*pow(H_per_H0(zF,pba)/H_per_H0(z,pba),2./3.);
+}
+
+/* define Hubble parameter (divided by its present value H0) in terms of z, for the LCDM model  */
+double H_per_H0(double z,
+                struct background * pba) {
+return sqrt(pba->Omega0_lambda+(pba->Omega0_cdm+pba->Omega0_b)*pow(1.0+z,3)+(pba->Omega0_g+pba->Omega0_ur)*pow(1.0+z,4));
+}
+
+/* computes the effective redshift for the formation of a halo of mass M  */
+double zF_wo_spike(void * params, double M) {
+ struct halos_workspace * params_local;
+ struct background * pba;
+ struct precision  * ppr;
+ double rho_m_0,sigma2, zF_no_spike;
+ double gamma=6.*pow(_PI_,2);
+ params_local = params;
+ pba = params_local->pba;
+ ppr = params_local->ppr;
+ rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+ params_local->R = pow(M/(gamma*rho_m_0),1./3.); /* R is in units of Mpc, so k should be in units of Mpc^{-1}  */
+ params_local->sigma2_st = integrate_simpson(ppr->k_min, 1./params_local->R,ppr->Number_k, LOG, integrand_for_sigma2,params_local);
+ zF_no_spike = -1.+sqrt(params_local->sigma2_st)/_delta_crit_;
+ return zF_no_spike;
+}
+
+double halo_function_high_mass(void * params,
+                               double M) { /* M should be passed in units of solar mass, M_sol */
+ struct halos_workspace * params_local;
+ struct precision  * ppr;
+ struct background * pba;
+ struct thermo * pth;
+ double z, R,Delta_crit_of_z, sigma2, pseudo_sigma2,rho_m_0;
+ double nu, nu_prime, nu_fnu, dlognu_dlogM, P_R_standard,cut_off=1.;
+ double a = 0.707,p= 0.3, A=0.322;      /* corresponds to Sheth-Tormen */
+// double a = 1.0,p= 0.0, A=0.5;       /* corresponds to standard Press-schechter */
+ double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double gamma=6.*pow(_PI_,2);
+ params_local = params;
+ ppr = params_local->ppr;
+ pba = params_local->pba;
+ pth = params_local->pth;
+ z = params_local->z;
+ rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+ params_local->R = pow(M/(gamma*rho_m_0),1./3.); /* R is in units of Mpc, so k should be in units of Mpc^{-1}  */
+ Delta_crit_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
+ sigma2 = integrate_simpson(ppr->k_min, 1./params_local->R ,ppr->Number_k, LOG, integrand_for_sigma2,params_local);
+ nu = pow(Delta_crit_of_z,2)/sigma2;
+ nu_prime = a*nu;
+ nu_fnu = A*(1.+1./pow(nu_prime,p))*sqrt(nu_prime/(2.*_PI_))*exp(-nu_prime/2.);
+ P_R_standard = pth->A_s*pow(cut_off,2)*pow(1./(pth->k_pivot*params_local->R),pth->n_s-1.);
+ dlognu_dlogM = (1./(3.*sigma2))*(4./25.)*pow(pow(1./params_local->R,2.)*T_Hu(1./params_local->R, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
+ return (1.0/pow(M,2))*nu_fnu*dlognu_dlogM;
+}
+
+/* define GROWTH FACTOR for the LCDM model */
+double D_growth(double z,
+                struct background * pba) {
+ double Om_Lambda, Om_m;
+ Om_m = (pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3)/(pba->Omega0_lambda+(pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3));
+ Om_Lambda = pba->Omega0_lambda/(pba->Omega0_lambda+(pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3));
+ return pow(1.+z,-1)*(5.*Om_m/2.)/(pow(Om_m,4./7.) - Om_Lambda + (1.+Om_m/2.)*(1.+Om_Lambda/70.)); //Taken from formula A4 in arXiv: 9709112
+}
+
+/* compute concentration function for UCMHs */
+double c_UCMH(double M,
+              void * params) {
+/* M needs to be passed in units of solar masses */
+struct halos_workspace * params_local;
+struct background * pba;
+struct thermo * pth;
+double conc_UCMH;
+double z, zF, Omega_m_at_zF;
+params_local = params;
+pba = params_local->pba;
+pth = params_local->pth;
+z = params_local->z;
+zF  = zF_w_spike(params_local, 0.01*M);
+Omega_m_at_zF = (pba->Omega0_cdm+pba->Omega0_b)*pow(1.+zF,3.)/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+zF,3.) + pba->Omega0_lambda);
+params_local->c3_over_mu = (3.*pth->f_2*Omega_m_at_zF/pth->Delta_c)*pow(H_per_H0(zF,pba)/H_per_H0(z,pba),2.);
+conc_UCMH = find_root_Newton(pow(params_local->c3_over_mu,1./3.),1.e-2,g_UCMH,g_UCMH_prime, params_local);
+return conc_UCMH;
+}
+
+double g_UCMH(void * params,
+              double c) {
+  struct halos_workspace * params_local;
+  params_local = params;
+  double mu;
+  mu = 2.*asinh(sqrt(c))-2.*sqrt(c/(1.+c));
+ return pow(c,3) -params_local->c3_over_mu*mu;
+}
+
+double g_UCMH_prime(void * params,
+                    double c) {
+  struct halos_workspace * params_local;
+  params_local = params;
+  double mu_deriv;
+  mu_deriv = c/sqrt(c*pow(c+1.,3));
+ return 3.*pow(c,2) -params_local->c3_over_mu*mu_deriv;
+}
+
+double zF_w_spike(void * params,
+                  double M) {
+ struct halos_workspace * params_local;
+ struct precision  * ppr;
+ struct background * pba;
+ struct thermo * pth;
+ double rho_m_0,sigma2, sigma2_standard, sigma2_spike;
+ double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double gamma=6.*pow(_PI_,2);
+ params_local = params;
+ ppr = params_local->ppr;
+ pba = params_local->pba;
+ pth = params_local->pth;
+ rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+ params_local->R = pow(M/(gamma*rho_m_0),1./3.); /* R is in units of Mpc, so k should be in units of Mpc^{-1}  */
+ sigma2_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
+ sigma2_standard = integrate_simpson(ppr->k_min, 1./params_local->R, ppr->Number_k, LOG, integrand_for_sigma2,params_local);
+ sigma2 = sigma2_spike + sigma2_standard;
+ return -1.+sqrt(sigma2)/_delta_crit_;
+}
+
+
+/* define function of concentration appearing for UCMH profiles */
+double f_UCMH(double c,
+              double M,
+              void * params) {
+  struct halos_workspace * params_local;
+  struct background * pba;
+  struct thermo * pth;
+  double D, rho_max, rho_s;
+  double z, zF, Delta_t, rho_m_0;
+  double lambda, mu;
+  double m_WIMP, sigmav_WIMP;
+  params_local = params;
+  pba = params_local->pba;
+  pth = params_local->pth;
+  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+  zF  = zF_w_spike(params_local, 0.01*M);
+  z = params_local->z;
+  rho_s = pth->f_2*rho_m_0*pow(1.+zF,3);
+  if (z < zF) {
+    Delta_t = MAX(tH0(z, pba)-tH0(zF, pba),tH0(zF, pba)-tH0(pow(4.,1./3.)*(zF+1.)-1., pba));
+  } else {
+    Delta_t = tH0(zF, pba)-tH0(pow(4.,1./3.)*(zF+1.)-1., pba);
+  }
+  // following conversion is required, because previous formulas were assuming m_WIMP was in units of 100 GeV and sigmav in units of 3x10^{-26} cm^3/s
+  m_WIMP = pth->DM_mass/100.;
+  sigmav_WIMP = pth->annihilation_cross_section/3.0e-26;
+  rho_max = (2.836e26*pba->h)*m_WIMP/(sigmav_WIMP*Delta_t);
+  D = pow(rho_max/rho_s, 2./3.);
+  class_test((pow(D,-1.)> c),
+             pth->error_message,
+             "D^{-1} =%e is bigger than c =%e ,this should never happen",1./D, c);
+  lambda = (1./3.)+(2.*c+3.)/(2.*pow(1.+c,2))+log(c/(1.+c))-(2.*pow(D,-1)+3.)/(2.*pow(1.+pow(D,-1),2))+log(1.+D);
+  mu = 2.*asinh(sqrt(c))-2.*sqrt(c/(1.+c));
+ return pow(c,3)*lambda*pow(mu,-2);
+}
+
+/* define cosmic time (multiplied by H0) in terms of z, for the LCDM model (radiation and curvature not taken into account) */
+double tH0(double z,
+           struct background * pba) {
+return (2./3.)*pow(pba->Omega0_lambda, -1./2.)*asinh(pow(pba->Omega0_lambda/(pba->Omega0_cdm+pba->Omega0_b), 1./2.)*pow(1.+z,-3./2.));
+}
+
+
+double integrand_boost_low_mass(void * params,
+                                double M) {
+  struct halos_workspace * params_local;
+  double c, integrand;
+  params_local = params;
+  c = c_UCMH(M, params_local);
+  integrand = M*halo_function_low_mass(params_local, M)*f_UCMH(c, M, params_local);
+  return integrand;
+}
+
+double halo_function_low_mass(void * params,
+                              double M) {
+  struct halos_workspace * params_local;
+  struct precision  * ppr;
+  struct background * pba;
+  struct thermo * pth;
+  double z, R,Delta_crit_of_z, sigma2, sigma2_standard, sigma2_spike, rho_m_0;
+  double nu, nu_prime, nu_fnu, dlognu_dlogM, P_R_standard, cut_off=1.;
+  double a = 0.707,p= 0.3, A=0.322;      /* corresponds to Sheth-Tormen */
+ // double a = 1.0,p= 0.0, A=0.5;       /* corresponds to standard Press-schechter */
+ double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double gamma=6.*pow(_PI_,2);
+ params_local = params;
+ ppr = params_local->ppr;
+ pba = params_local->pba;
+ pth = params_local->pth;
+ z = params_local->z;
+ rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+ params_local->R = pow(M/(gamma*rho_m_0),1./3.);
+ Delta_crit_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
+ sigma2_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+ sigma2_standard = integrate_simpson(ppr->k_min, 1./params_local->R ,ppr->Number_k, LOG, integrand_for_sigma2,params_local);
+ sigma2 = sigma2_spike + sigma2_standard;
+ nu = pow(Delta_crit_of_z,2)/sigma2;
+ nu_prime = a*nu;
+ nu_fnu = A*(1.+1./pow(nu_prime,p))*sqrt(nu_prime/(2.*_PI_))*exp(-nu_prime/2.);
+ P_R_standard = pth->A_s*pow(cut_off,2)*pow(1./(pth->k_pivot*params_local->R),pth->n_s-1.);
+ dlognu_dlogM = (1./(3.*sigma2))*(4./25.)*pow(pow(1./params_local->R,2.)*T_Hu(1./params_local->R, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
+ return (1.0/pow(M,2))*nu_fnu*dlognu_dlogM;
 }

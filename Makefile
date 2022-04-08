@@ -30,7 +30,7 @@ AR        = ar rv
 # add a compilation option on the terminal command line:
 # "PYTHON=python3 make all" (THanks to Marius Millea for pyhton3
 # compatibility)
-PYTHON ?= python
+PYTHON ?= python3
 
 # your optimization flag
 OPTFLAG = -O4 -ffast-math #-march=native
@@ -38,9 +38,9 @@ OPTFLAG = -O4 -ffast-math #-march=native
 #OPTFLAG = -fast
 
 # your openmp flag (comment for compiling without openmp)
-OMPFLAG   = -fopenmp
+#OMPFLAG   = -fopenmp
 #OMPFLAG   = -mp -mp=nonuma -mp=allcores -g
-#OMPFLAG   = -openmp
+OMPFLAG   = -openmp
 
 # all other compilation flags
 CCFLAG = -g -fPIC

@@ -417,7 +417,7 @@ def sample_spectrum(input_spec_el, input_spec_ph, input_spec_oth, input_log10E, 
 	energy_input_type = DarkOptions.get('energy_input_type','log10E')
 	spec_type = DarkOptions.get('spec_type','dN/dE')
 	hist = DarkOptions.get('injection_history','annihilation')
-	norm_dict = {'annihilation':2., 'annihilation_halos':2., 'decay':1.}
+	norm_dict = {'annihilation':2., 'annihilation_halos':2.,'annihilation_UCMHs':2.,'decay':1.} 
 	norm = norm_dict.get(hist,2.)*m
 
 	try:
