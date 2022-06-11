@@ -3935,6 +3935,7 @@ int input_default_params(
   pth->log10_Mcut_PBH = 2;
   pth->num_PBH_accreting_mass = 10;
   pth->has_UCMH_spike = _FALSE_; // GFA
+  pth->M_at_Mthres = NO; // GFA
   pth->A_spike = 1.e-10;
   pth->k_spike =1.e3;
   pth->f_2 = 30.;

@@ -18,6 +18,10 @@ enum recombination_algorithm {
   cosmorec
 };
 
+//GFA
+enum is_M_at_Mthres {YES, NO};
+
+
 /**
  * List of possible reionization schemes.
  */
@@ -104,6 +108,8 @@ struct thermo
   double YHe;  /**< \f$ Y_{He} \f$: primordial helium fraction */
 
   enum recombination_algorithm recombination; /**< recombination code */
+
+  enum is_M_at_Mthres M_at_Mthres; //gfa
 
   enum reionization_parametrization reio_parametrization; /**< reionization scheme */
 
@@ -980,8 +986,9 @@ struct halos_workspace {
        double R; /* comoving scale */
        double z; /* redshift */
        double c3_over_mu;
-       double sigma2_st;
+       double S0;
 };
+
 
 int compute_boost_NFW_UCMH(struct precision * ppr, //GFA
                              struct background * pba,
@@ -997,13 +1004,14 @@ double G(double y);
 double T_Hu(double k,
             struct background * pba);
 
-double integrand_for_sigma2(void * params,
+double integrand_for_S(void * params,
                             double k);
 
 double integrand_boost_high_mass(void * params,
                                  double M);
 
-double f_NFW(double c);
+double one_halo_boost_NFW(double c,
+                          void * params);
 
 double c_NFW(double M,
              void * params);
@@ -1032,9 +1040,15 @@ double g_UCMH_prime(void * params,
 double zF_w_spike(void * params,
                   double M);
 
-double f_UCMH(double c,
-              double M,
-              void * params);
+double zF_Mthres_avg(void * params,
+                     double z);
+
+double integrand_for_zf_avg(void * params,
+                            double nu);
+
+double one_halo_boost_UCMH(double c,
+                           double M,
+                           void * params);
 
 double tH0(double z,
            struct background * pba);
