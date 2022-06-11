@@ -947,6 +947,10 @@ int thermodynamics_free(
   free(pth->z_table);
   free(pth->thermodynamics_table);
   free(pth->d2thermodynamics_dz2_table);
+  if (pth->has_UCMH_spike == _TRUE_) {
+    free(pth->boost_table);
+    free(pth->z_table_for_boost);
+  }
 
 
 
