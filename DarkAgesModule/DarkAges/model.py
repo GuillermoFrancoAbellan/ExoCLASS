@@ -224,13 +224,19 @@ class annihilating_halos_model(model):
 
 
 class annihilating_UCMHs_model(model):
-	def __init__(self,ref_el_spec,ref_ph_spec,ref_oth_spec,m,logEnergies=None,redshift=None, **DarkOptions):
+#	def __init__(self,ref_el_spec,ref_ph_spec,ref_oth_spec,m,z_boost=[0.]*100,boost=[0.]*100,logEnergies=None,redshift=None, **DarkOptions):
+	def __init__(self,ref_el_spec,ref_ph_spec,ref_oth_spec,m,r,logEnergies=None,redshift=None, **DarkOptions):
+
 
 		from .special_functions import boost_factor_UCMHs
 
-		def scaling_boost_factor(redshift,spec_point):
-			ret = spec_point*boost_factor_UCMHs(redshift)
+		def scaling_boost_factor(redshift,spec_point,r):
+			ret = spec_point*boost_factor_UCMHs(redshift,r)
 			return ret
+
+#		def scaling_boost_factor(redshift,spec_point,z_boost,boost):
+#			ret = spec_point*boost_factor_UCMHs(redshift,z_boost,boost)
+#			return ret
 
 		if logEnergies is None:
 			logEnergies = get_logEnergies()
@@ -238,9 +244,12 @@ class annihilating_UCMHs_model(model):
 			redshift = get_redshift()
 
 		tot_spec = ref_el_spec + ref_ph_spec + ref_oth_spec
-#		a_file = open("Boost_dark_ages.txt", "w")
-#		np.savetxt(a_file, boost_factor_UCMHs(redshift))
+
+#       GFA, here the data files are correctly read
+#		a_file = open("Boost_dark_ages_1.txt", "w")
+#		np.savetxt(a_file,boost)
 #		a_file.close()
+
 
 		norm_by = DarkOptions.get('normalize_spectrum_by','energy_integral')
 		if norm_by == 'energy_integral':
@@ -254,10 +263,15 @@ class annihilating_UCMHs_model(model):
 			normalization = np.ones_like(redshift)*(2*m)
 		else:
 			raise DarkAgesError('I did not understand your input of "normalize_spectrum_by" ( = {:s}). Please choose either "mass" or "energy_integral"'.format(norm_by))
-		normalization *= boost_factor_UCMHs(redshift)
+#		normalization *= boost_factor_UCMHs(redshift, z_boost, boost)
+		normalization *= boost_factor_UCMHs(redshift,r)
 
-		spec_electrons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_el_spec[:,None])
-		spec_photons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_ph_spec[:,None])
+
+		spec_electrons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_el_spec[:,None],r)
+		spec_photons = np.vectorize(scaling_boost_factor).__call__(redshift[None,:],ref_ph_spec[:,None],r)
+
+#		spec_electrons = np.vectorize(scaling_boost_factor,excluded=['z_boost','boost']).__call__(redshift[None,:],ref_el_spec[:,None],z_boost,boost)
+#		spec_photons = np.vectorize(scaling_boost_factor,excluded=['z_boost','boost']).__call__(redshift[None,:],ref_ph_spec[:,None],z_boost,boost)
 
 		model.__init__(self, spec_electrons, spec_photons, normalization, logEnergies,3)
 

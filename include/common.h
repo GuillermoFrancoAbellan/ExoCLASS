@@ -28,6 +28,7 @@
 typedef char ErrorMsg[_ERRORMSGSIZE_]; /**< Generic error messages (there is such a field in each structure) */
 
 #define _FILENAMESIZE_ 256 /**< size of the string read in each line of the file (extra characters not taken into account) */
+//#define _FILENAMESIZE_ 2048 /**< size of the string read in each line of the file (extra characters not taken into account) */
 typedef char FileName[_FILENAMESIZE_];
 
 #define _PI_ 3.1415926535897932384626433832795e0 /**< The number pi */
@@ -352,6 +353,9 @@ struct precision
    * default initial value of scale factor in background integration, in
    * units of scale factor today
    */
+
+  int random; //GFA, random number 
+
   double a_ini_over_a_today_default;
 
   /**

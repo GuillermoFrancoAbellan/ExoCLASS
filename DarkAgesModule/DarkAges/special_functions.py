@@ -15,15 +15,27 @@ def boost_factor_halos(redshift,zh,fh):
 	return ret
 
 # GFA
-def boost_factor_UCMHs(redshift):
-    file_boost = [os.path.join( os.path.dirname(os.path.realpath( __file__ )), '../../Boost_vs_z.txt' )]
+def boost_factor_UCMHs(redshift,r):
+#def boost_factor_UCMHs(redshift, z_boost=[0]*100, boost=[0]*100):
+#	if not hasattr(z_boost,'__len__'):
+#		z_boost = np.asarray([z_boost])
+
+#	if not hasattr(boost,'__len__'):
+#		boost = np.asarray([boost])
+
+#	a_file = open("Boost_dark_ages_2.txt", "w") #GFA, here only the first element of z_boost or boost is read (when called inside vectorize())
+#	np.savetxt(a_file,z_boost)
+#	a_file.close()
+
+    file_boostt = [os.path.join(os.path.dirname(os.path.realpath(__file__ )),'../../Boost_%d.txt')%r]
     data = []
-    for data_file in file_boost:
+    for data_file in file_boostt:
         data.append(np.loadtxt(data_file))
     boost = data[0]
-    boost_at_z = interp1d(boost[:,0], boost[:,1])
+    boost_at_z = interp1d(boost[:,0],boost[:,1])
     ret = boost_at_z(redshift)
     return ret
+
 
 def secondaries_from_cirelli(logEnergies,mass,primary, **DarkOptions):
 	from .common import sample_spectrum

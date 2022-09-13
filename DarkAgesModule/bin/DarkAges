@@ -77,6 +77,16 @@ parser.add_option("--zh", type='float', dest='zh',
                   help="Define the onset of halos formation.")
 parser.add_option("--fh", type='float', dest='fh',
                   help="Define the amplitude of DM halos.")
+parser.add_option("--random", type='int', dest='r',
+                  help="Random integer number just used to label different boost files.")
+#parser.add_option("--z_boost", type='float', dest='z_boost',nargs=100, #GFA, Number_z hard-coded here
+#                  help="Define the array of z values for the boost calculation from spiky spectrum (NFW+UCMH halos)")
+#parser.add_option("--boost", type='float', dest='boost',nargs=100,  #GFA, Number_z hard-coded here
+#                  help="Define the array of boost values for the boost calculation from spiky spectrum (NFW+UCMH halos)")
+#parser.add_option("--z_boost",metavar='Z_BOOST', action='callback', callback=cb_float, dest='z_boost',
+#                  help="Define the array of z values for the boost calculation from spiky spectrum (NFW+UCMH halos)")
+#parser.add_option("--boost", metavar='BOOST', action='callback', callback=cb_float, dest='boost',
+#                  help="Define the array of boost values for the boost calculation from spiky spectrum (NFW+UCMH halos)")
 parser.add_option("", "--use-background", dest="background", nargs=3, type="float", default=(67.27, 0.3156, 8e-5),
                   help="Define the background parameters (H0, Omega_m, Omega_r) for the calculation of H(z) and t(z)")
 parser.add_option("--extra-options", dest="extra", metavar="EXTRA.yaml",
@@ -213,4 +223,7 @@ if options.spectrum is not None:
 	except AssertionError:
 		raise DarkAgesError('The number of spectra (== {:d}) and the number of branching ratios (== {:d}) do not match'.format(len(options.spectrum),len(options.branchings)))
 
-	sys.exit( recipes.loading_from_specfiles(options.spectrum, transfer_functions, options.mass, t_dec=options.t_dec, zh=options.zh, fh=options.fh, hist=options.injection_history, branchings=options.branchings, **DarkOptions) )
+#	options.z_boost = np.asarray(options.z_boost)
+#	options.boost = np.asarray(options.boost)
+#	sys.exit( recipes.loading_from_specfiles(options.spectrum, transfer_functions, options.mass, t_dec=options.t_dec, zh=options.zh, fh=options.fh,z_boost=options.z_boost,boost=options.boost,hist=options.injection_history, branchings=options.branchings, **DarkOptions))
+	sys.exit(recipes.loading_from_specfiles(options.spectrum, transfer_functions, options.mass, t_dec=options.t_dec, zh=options.zh, fh=options.fh,r=options.r,hist=options.injection_history, branchings=options.branchings, **DarkOptions))

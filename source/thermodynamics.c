@@ -301,6 +301,9 @@ int thermodynamics_init(
 
   int index_z; // GFA
   int status;
+  char string1[10*_ARGUMENT_LENGTH_MAX_];
+  char string2[10*_ARGUMENT_LENGTH_MAX_];
+  char command_with_arguments[20*_ARGUMENT_LENGTH_MAX_];
   FILE * file_boost = fopen(ppr->boost_file, "w");
 
 
@@ -343,6 +346,20 @@ int thermodynamics_init(
          fprintf(file_boost, "%e\t %e \n",pth->z_table_for_boost[index_z], pth->boost_table[index_z]);
         }
         fclose(file_boost);
+    //    strcat(ppr->command_fz," --z_boost ");
+    //    for (index_z=0; index_z <= ppr->Number_z; index_z++) {
+    //      sprintf(string1,"%g",pth->z_table_for_boost[index_z]);
+    //      strcat(ppr->command_fz,string1);
+    //      strcat(ppr->command_fz," ");
+    //    }
+
+    //    strcat(ppr->command_fz," --boost ");
+    //    for (index_z=0; index_z <= ppr->Number_z; index_z++) {
+    //      sprintf(string1,"%g",pth->boost_table[index_z]);
+    //      strcat(ppr->command_fz,string1);
+    //      strcat(ppr->command_fz," ");
+    //    }
+
     }
 
 
@@ -951,7 +968,6 @@ int thermodynamics_free(
     free(pth->boost_table);
     free(pth->z_table_for_boost);
   }
-
 
 
   return _SUCCESS_;
@@ -6269,15 +6285,14 @@ int compute_boost_NFW_UCMH(
   //Compute low-mass contribution
   boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
   // compute spike contribution
-//  pth->M_at_Mthres = YES; //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
-// the calculation of z_avg diverges at high z, so for the moment we don't use it
+  pth->M_at_Mthres = YES; //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
   omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
   nu_minus = omega_of_z/sqrt(S_tot);
   nu_plus  = omega_of_z/sqrt(S_standard);
   N_frac_spike = erf(nu_plus/sqrt(2.)) - erf(nu_minus/sqrt(2.));
   c_spike  = c_UCMH(Mass_thres, &params);
   boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
-//  pth->M_at_Mthres = NO;
+  pth->M_at_Mthres = NO;
   // add up the three contributions
   pth->boost_table[index_z] = 1.+boost_spike+boost_low_mass+boost_high_mass;
  }
@@ -6475,10 +6490,6 @@ pth = params_local->pth;
 z = params_local->z;
 if (pth->M_at_Mthres == YES) {
   zF  = zF_Mthres_avg(params_local,z);
-//  printf("zF = %e,  z = %e\n",zF,z);
-//  if (isnan(zF) == 1 || isinf(zF) == 1 ) {
-//    zF = 0.
-// }
 } else {
   zF  = zF_w_spike(params_local, M);
 }
@@ -6525,6 +6536,7 @@ double zF_w_spike(void * params,
  S_standard = integrate_simpson(ppr->k_min, 1./params_local->R, ppr->Number_k, LOG, integrand_for_S,params_local);
  S_tot = S_spike + S_standard;
  return -1.+sqrt(S_tot)/_delta_crit_;
+
 }
 
 
@@ -6536,6 +6548,7 @@ double zF_Mthres_avg(void * params,
  struct thermo * pth;
  double rho_m_0,S_tot, S_standard, S_spike;
  double nu_minus,nu_plus,omega_of_z, N_frac_spike, z_avg;
+ double z_aprox;
  double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
  params_local = params;
  ppr = params_local->ppr;
@@ -6547,9 +6560,15 @@ double zF_Mthres_avg(void * params,
  omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
  nu_minus = omega_of_z/sqrt(S_tot);
  nu_plus  = omega_of_z/sqrt(S_standard);
- N_frac_spike = erf(nu_plus/sqrt(2.)) - erf(nu_minus/sqrt(2.));
- z_avg = integrate_simpson(nu_minus, nu_plus,ppr->Number_M, LOG, integrand_for_zf_avg, params_local);
- z_avg = z_avg/N_frac_spike; // GFA: PROBLEM HERE, this explodes at very high z, when N_frac_spike goes to zero
+ N_frac_spike = erfc(nu_minus/sqrt(2.)) - erfc(nu_plus/sqrt(2.));
+ z_avg = integrate_simpson(nu_minus, nu_plus,100000, LOG, integrand_for_zf_avg, params_local);
+ z_avg = z_avg/N_frac_spike;
+ if (N_frac_spike <1.e-100) { //to avoid divergences when N_frac_spike is tiny, substitute full expression of z_avg for approximate expression coming from a Taylor expansion (at nu_minus, nu_plus >> 1)
+ z_avg =  -1. + ((1.+z)/nu_minus)*(1.-pow(nu_minus/nu_plus,2)*exp(-(pow(nu_plus,2)-pow(nu_minus,2))/2.))/(1.-(nu_minus/nu_plus)*exp(-(pow(nu_plus,2)-pow(nu_minus,2))/2.));
+ }
+ class_test(isnan(z_avg) || isinf(z_avg),
+            pth->error_message,
+            "The average formation redshift z_avg diverges,this should never happen");
 return z_avg;
 }
 

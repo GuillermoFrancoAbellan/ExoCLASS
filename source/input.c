@@ -6,6 +6,7 @@
 
 #include "input.h"
 #include "integration_routines_2.h" // GFA
+#include <time.h> // GFA
 
 /**
  * Use this routine to extract initial parameters from files 'xxx.ini'
@@ -2006,6 +2007,9 @@ if (_FALSE_) {
             "The field injected_particle_branching_ratio is empty!! You need to give a list of number (<=1) (as many as there are injected particles) with a SPACE (no comas) between each of them. The sum MUST add to 1.\n");
           strcat(ppr->command_fz," --mass=");
           sprintf(string2,"%g",pth->DM_mass);
+          strcat(ppr->command_fz,string2);
+          strcat(ppr->command_fz," --random=");
+          sprintf(string2,"%d",ppr->random);
           strcat(ppr->command_fz,string2);
         }
 
@@ -4210,6 +4214,10 @@ int input_default_params(
 
 int input_default_precision ( struct precision * ppr ) {
 
+  srand(time(NULL));
+  ppr->random = (rand()%10000)+1; //random number between 1 and 10000
+  char string[_ARGUMENT_LENGTH_MAX_];
+
   /** Initialize presicion parameters for different structures:
    * - parameters related to the background
    */
@@ -4236,8 +4244,8 @@ int input_default_precision ( struct precision * ppr ) {
   sprintf(ppr->sBBN_file,__CLASSDIR__);
   strcat(ppr->sBBN_file,"/bbn/sBBN_2017.dat");
   sprintf(ppr->boost_file,__CLASSDIR__);
-  strcat(ppr->boost_file,"/Boost_vs_z.txt"); //GFA
-
+  sprintf(string,"/Boost_%d.txt",ppr->random);
+  strcat(ppr->boost_file,string); //GFA
 
   /*For energy injection from DM annihilation or decays */
   sprintf(ppr->energy_injec_coeff_file,__CLASSDIR__);

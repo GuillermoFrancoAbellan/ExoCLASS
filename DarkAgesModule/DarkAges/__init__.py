@@ -145,7 +145,7 @@ def get_background(key=None):
 		else:
 			raise DarkAgesError('CosmoBackground has no key "{0}"'.format(key))
 
-def set_background(H0 = 67.27, Om_M = 0.3156, Om_R = 8e-5):
+def set_background(H0 = 67.27, Om_M = 0.3156, Om_R = 8e-5): #GFA, these are default values if no argument is passed to the function
 	u"""Defines the background parameters :math:`H_0`, :math:`\\Omega_\\mathrm{matter}`
 	and :math:`\\Omega_\\mathrm{radiation}`
 	(Mostly for the use of :func:`H <DarkAges.common.H>`).
@@ -169,9 +169,9 @@ def set_background(H0 = 67.27, Om_M = 0.3156, Om_R = 8e-5):
 
 	_km_per_Mpc = 3.241e-20
 
-	global CosmoBackground
-	CosmoBackground = dict()
-	CosmoBackground.update({'H0':H0*_km_per_Mpc,'Omega_m':Om_M,'Omega_r':Om_R})
+	global CosmoBackground  # GFA, global variable, this means it can only be used only inside this function
+	CosmoBackground = dict()  # GFA, this creates an empty dictionary
+	CosmoBackground.update({'H0':H0*_km_per_Mpc,'Omega_m':Om_M,'Omega_r':Om_R})  #GFA, this adds elements to the dictionary
 	return
 
 def get_redshift():
