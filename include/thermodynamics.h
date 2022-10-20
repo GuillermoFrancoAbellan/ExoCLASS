@@ -65,6 +65,11 @@ enum PBH_accretion_recipe {
   disk_accretion  /**< ADAF accretion recipe from Xie and Yuan 2012, following Poulin et al 1707.04206 */
 };
 
+enum UCMH_recipe {
+  GG, /**< à la G. Fachinetti & G. F. Abellán */
+  Delos  /**< à la Delos et al. 1806.07389 */
+};
+
 enum energy_deposition_function {
   No_deposition, /**< No energy deposition is considered. Useful for pedagogic illustration. */
   Analytical_approximation, /**< Analytical energy deposition treatment, introduced in 1209.0247 and corrected in 1612.05644 */
@@ -297,11 +302,18 @@ double * reio_inter_xe; /**< discrete \f$ X_e(z)\f$ values */
   double f_eff; /** effective on the spot parameter */
 
   short has_UCMH_spike; /**< flag to specify if we want to consider a spike in the primordial spectrum, leading to the formation of  UCMHs**/
+  enum UCMH_recipe UCMH_recipe; /**< recipe to compute boost factor from mini-halos */
+  short add_baryons_UCMH; /**< flag to specify if we want to consider baryons in the transfer functions for the calculation of the UCMH boost **/
+  short add_suppression_kfs_UCMH; /**< flag to specify if we want to consider free-streaming suppression in the transfer functions for the calculation of the UCMH boost **/
+  short consider_only_spike_UCMH; /**< flag to specify if we want to consider only the spike contribution for the calculation of the UCMH boost (in the GG method) **/
+  short consider_zF_avg_UCMH; /**< flag to specify if we want to use the average formation redshift for the spike contribution in the UCMH boost (in the GG method) **/
   double A_spike; //amplitude of the spike
   double k_spike; //location of the spike
   double f_2;     // Given from a fit to N-body simulations by by Delos et al.
   double Delta_c; //characteristic overdensity of halos at collapse
   double Mass_min; //minimal halo mass in units of M_sol, dependent of the WIMP model
+  double k_fs;    //free-streaming scale in units of Mpc^-1, dependent of the WIMP model
+
 
   double A_s;
   double n_s;
@@ -999,6 +1011,9 @@ double T0_tilde(double k,
                 double beta,
                 struct background * pba);
 
+double T_Hu_no_baryon(double k,
+                      struct background * pba);
+
 double G(double y);
 
 double T_Hu(double k,
@@ -1031,6 +1046,9 @@ double D_growth(double z,
 double c_UCMH(double M,
               void * params);
 
+double c_UCMH2(double zF,
+              void * params);
+
 double g_UCMH(void * params,
               double c);
 
@@ -1046,9 +1064,16 @@ double zF_Mthres_avg(void * params,
 double integrand_for_zf_avg(void * params,
                             double nu);
 
+double integrand_boost_spike(void * params,
+                             double zF);
+
 double one_halo_boost_UCMH(double c,
                            double M,
                            void * params);
+
+double one_halo_boost_UCMH2(double c,
+                            double zF,
+                            void * params);
 
 double tH0(double z,
            struct background * pba);
@@ -1058,6 +1083,12 @@ double integrand_boost_low_mass(void * params,
 
 double halo_function_low_mass(void * params,
                               double M);
+
+double f_BBKS(double x);
+
+double Transfer_f(double k,
+                  struct background * pba,
+                  struct thermo * pth);
 
 #ifdef __cplusplus
 }

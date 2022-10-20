@@ -342,7 +342,7 @@ int thermodynamics_init(
         class_alloc(pth->boost_table,ppr->Number_z*sizeof(double),pth->error_message);
         class_call(compute_boost_NFW_UCMH(ppr,pba,pth),pth->error_message,pth->error_message);
         /* write the results for the boost factor in a datafile, they will be read later inside DarkAges */
-        for (index_z=0; index_z <= ppr->Number_z; index_z++) {
+        for (index_z=0; index_z < ppr->Number_z; index_z++) {
          fprintf(file_boost, "%e\t %e \n",pth->z_table_for_boost[index_z], pth->boost_table[index_z]);
         }
         fclose(file_boost);
@@ -940,7 +940,7 @@ int thermodynamics_init(
       }
     } else {
       printf("Unable to delete the Boost file \n");
-      exit(EXIT_FAILURE);
+//      exit(EXIT_FAILURE);
      }
   }
 
@@ -6248,19 +6248,25 @@ int compute_boost_NFW_UCMH(
  double z_step, z;
  int index_z;
  int index_M;
- double rho_m_0, H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double rho_m_0,rho_m_eq, H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
  double nu_minus,nu_plus,omega_of_z, N_frac_spike, c_spike, rho_c_over_rho_m;
  double S_standard=0., S_spike=0., S_tot=0.;
  double boost_low_mass, boost_high_mass, boost_spike;
  double gamma = 6.*pow(_PI_,2);
+ double zF_min, zF_max;
 
  params.ppr = ppr;
  params.pba = pba;
  params.pth = pth;
 
  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2);  /* present matter density in units of M_sol/Mpc^3 */
+ rho_m_eq = rho_m_0*pow(1.+pba->z_eq,3);  /* matter density at equality in units of M_sol/Mpc^3 */
  Mass_thres = gamma*pow(pth->k_spike,-3)*rho_m_0;
-
+ pth->Mass_min = gamma*pow(pth->k_fs,-3)*rho_m_0; //We always fix a minimal mass different from zero, even when we don't consider a free-streaming suppression in the transfer function
+ if (pth->add_suppression_kfs_UCMH == _TRUE_) {
+   pth->Mass_min *= 1.e-6; //if we add a suppression in the transfer function, we can integrate the mass function from arbitrarily small masses,
+                            // since the free-streaming cut-off in the transfer will automatically kill the boost for M < M_min
+ }
  if (pth->thermodynamics_verbose > 0) {
    printf("Computing boost factor for spiky primordial spectrum \n");
  }
@@ -6270,31 +6276,56 @@ int compute_boost_NFW_UCMH(
             pth->error_message,
             "Mass_thres =%e Msun is smaller than Mass_min =%e Msun, this should never happen",Mass_thres, pth->Mass_min);
 
- S_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+ S_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*Transfer_f(pth->k_spike, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
  S_standard = integrate_simpson(ppr->k_min, pth->k_spike ,ppr->Number_k, LOG, integrand_for_S, &params);
  S_tot = S_spike + S_standard;
 
- z_step=(log10(ppr->z_max)-log10(ppr->z_min))/(ppr->Number_z);
+ z_step=(log10(ppr->z_max)-log10(ppr->z_min))/(ppr->Number_z-1);
 
- for (index_z=0; index_z <=ppr->Number_z; index_z++) {
-  z = ppr->z_min*pow(10,index_z*z_step);
+ for (index_z=0; index_z < ppr->Number_z; index_z++) {
+  z = ppr->z_min*pow(10.,index_z*z_step);
   pth->z_table_for_boost[index_z] = z;
   params.z = z;
-  //Compute high-mass contribution
-  boost_high_mass  = integrate_simpson(Mass_thres, ppr->Mass_max ,ppr->Number_M, LOG, integrand_boost_high_mass,&params);
-  //Compute low-mass contribution
-  boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
-  // compute spike contribution
-  pth->M_at_Mthres = YES; //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
-  omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
-  nu_minus = omega_of_z/sqrt(S_tot);
-  nu_plus  = omega_of_z/sqrt(S_standard);
-  N_frac_spike = erf(nu_plus/sqrt(2.)) - erf(nu_minus/sqrt(2.));
-  c_spike  = c_UCMH(Mass_thres, &params);
-  boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
-  pth->M_at_Mthres = NO;
-  // add up the three contributions
-  pth->boost_table[index_z] = 1.+boost_spike+boost_low_mass+boost_high_mass;
+  if (pth->UCMH_recipe == Delos) {
+    // compute spike contribution (the only present in this case)
+    zF_min = z;
+    zF_max = pba->z_eq; //We restrict to mini-halos forming after matter-radiation equality, although next integral shouldn't depend a lot on this choice
+    boost_spike = integrate_simpson(zF_min, zF_max,1000, LOG, integrand_boost_spike,&params);
+    boost_spike *= pow(1.+z,-3.);
+    if (boost_spike <0.) {
+      boost_spike=0.;
+    }
+    pth->boost_table[index_z] = 1.+boost_spike;
+  } else if (pth->UCMH_recipe == GG) {
+    //Compute high-mass contribution
+    boost_high_mass  = integrate_simpson(Mass_thres, ppr->Mass_max ,ppr->Number_M, LOG, integrand_boost_high_mass,&params);
+    //Compute low-mass contribution
+    boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
+    // compute spike contribution
+    if (pth->consider_zF_avg_UCMH == _TRUE_) {
+      pth->M_at_Mthres = YES;  //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
+    }
+    omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
+    if (pth->consider_only_spike_UCMH == _TRUE_) {
+      nu_minus = omega_of_z/sqrt(S_spike);
+      N_frac_spike = erfc(nu_minus/sqrt(2.));
+    } else {
+      nu_minus = omega_of_z/sqrt(S_tot);
+      nu_plus  = omega_of_z/sqrt(S_standard);
+      N_frac_spike = erf(nu_plus/sqrt(2.)) - erf(nu_minus/sqrt(2.));
+    }
+    c_spike  = c_UCMH(Mass_thres, &params);
+    boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
+    if (pth->consider_zF_avg_UCMH == _TRUE_) {
+      pth->M_at_Mthres = NO;
+    }
+    // add up the three contributions
+    if (pth->consider_only_spike_UCMH == _TRUE_) {
+      pth->boost_table[index_z] = 1.+boost_spike;
+    } else {
+      pth->boost_table[index_z] = 1.+boost_spike+boost_low_mass+boost_high_mass;
+    }
+  }
  }
 
  return _SUCCESS_;
@@ -6310,6 +6341,15 @@ double C;
 double q = k/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h); /* k needs to be passed in Mpc^{-1} */
 C = (14.2/alpha) + 386./(1.+69.9*pow(q,1.08));
 return log(exp(1.)+1.8*beta*q)/(log(exp(1.)+1.8*beta*q)+C*pow(q,2));
+}
+
+double T_Hu_no_baryon(double k,
+                      struct background * pba) {
+double C0, L0;
+double q = k/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h); /* k needs to be passed in Mpc^{-1} */
+L0 = log(2.*exp(1.)+1.8*q);
+C0 = 14.2 + 731./(1.+62.5*q);
+return L0/(L0+C0*pow(q,2));
 }
 
 /* required for baryon piece of transfer function, defined below */
@@ -6367,7 +6407,7 @@ double integrand_for_S(void * params,
  pba = params_local->pba;
  pth = params_local->pth;
  /* Ratio of matter spectrum and primordial spectrum, as given in Dodelson's book */
-  transfer = (4.0/25.0)*pow(pow(k,2)*D_growth(0.,pba)*T_Hu(k, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
+  transfer = (4.0/25.0)*pow(pow(k,2)*D_growth(0.,pba)*Transfer_f(k, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
  /* select the primordial spectrum  */
   primordial = pth->A_s*pow(cut_off,2)*pow(k/pth->k_pivot ,pth->n_s-1.);
 
@@ -6436,7 +6476,7 @@ double zF_wo_spike(void * params, double M) {
  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
  params_local->R = pow(M/(gamma*rho_m_0),1./3.); /* R is in units of Mpc, so k should be in units of Mpc^{-1}  */
  params_local->S0 = integrate_simpson(ppr->k_min, 1./params_local->R,ppr->Number_k, LOG, integrand_for_S,params_local);
- zF_no_spike = -1.+sqrt(params_local->S0)/_delta_crit_;
+ zF_no_spike = -1.+sqrt(params_local->S0)/_delta_crit_; //Here it is assumed for simplicity that D_growth(z)=1./(1.+z)
  return zF_no_spike;
 }
 
@@ -6462,7 +6502,7 @@ double halo_function_high_mass(void * params,
  nu = omega_of_z/sqrt(S_tot);
  fnu = sqrt(2./_PI_)*exp(-pow(nu,2)/2.);
  P_R_standard = pth->A_s*pow(cut_off,2)*pow(1./(pth->k_pivot*params_local->R),pth->n_s-1.);
- dS0_dM = (1./(3.*M))*(4./25.)*pow(pow(1./params_local->R,2.)*D_growth(0.,pba)*T_Hu(1./params_local->R, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
+ dS0_dM = (1./(3.*M))*(4./25.)*pow(pow(1./params_local->R,2.)*D_growth(0.,pba)*Transfer_f(1./params_local->R, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
  return (1./M)*(nu/(2.*S_tot))*fnu*dS0_dM;
 }
 
@@ -6499,6 +6539,25 @@ conc_UCMH = find_root_Newton(pow(params_local->c3_over_mu,1./3.),1.e-2,g_UCMH,g_
 return conc_UCMH;
 }
 
+/* compute concentration function for UCMHs */
+double c_UCMH2(double zF,
+              void * params) {
+/* M needs to be passed in units of solar masses */
+struct halos_workspace * params_local;
+struct background * pba;
+struct thermo * pth;
+double conc_UCMH;
+double z, Omega_m_at_zF;
+params_local = params;
+pba = params_local->pba;
+pth = params_local->pth;
+z = params_local->z;
+Omega_m_at_zF = (pba->Omega0_cdm+pba->Omega0_b)*pow(1.+zF,3.)/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+zF,3.) + pba->Omega0_lambda);
+params_local->c3_over_mu = (3.*pth->f_2*Omega_m_at_zF/pth->Delta_c)*pow(H_per_H0(zF,pba)/H_per_H0(z,pba),2.);
+conc_UCMH = find_root_Newton(pow(params_local->c3_over_mu,1./3.),1.e-2,g_UCMH,g_UCMH_prime, params_local);
+return conc_UCMH;
+}
+
 double g_UCMH(void * params,
               double c) {
   struct halos_workspace * params_local;
@@ -6523,7 +6582,7 @@ double zF_w_spike(void * params,
  struct precision  * ppr;
  struct background * pba;
  struct thermo * pth;
- double rho_m_0,S_tot, S_standard, S_spike;
+ double rho_m_0,S_tot, S_standard, S_spike, zF;
  double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
  double gamma=6.*pow(_PI_,2);
  params_local = params;
@@ -6532,10 +6591,15 @@ double zF_w_spike(void * params,
  pth = params_local->pth;
  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
  params_local->R = pow(M/(gamma*rho_m_0),1./3.); /* R is in units of Mpc, so k should be in units of Mpc^{-1}  */
- S_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2)*D_growth(0.,pba)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
+ S_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2)*D_growth(0.,pba)*Transfer_f(pth->k_spike, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2)),2);
  S_standard = integrate_simpson(ppr->k_min, 1./params_local->R, ppr->Number_k, LOG, integrand_for_S,params_local);
  S_tot = S_spike + S_standard;
- return -1.+sqrt(S_tot)/_delta_crit_;
+ if (pth->consider_only_spike_UCMH == _TRUE_) { //Here it is assumed for simplicity that D_growth(z)=1/(1+z)
+   zF = -1.+sqrt(S_spike)/_delta_crit_;
+ } else {
+   zF = -1.+sqrt(S_tot)/_delta_crit_;
+ }
+ return zF;
 
 }
 
@@ -6554,13 +6618,19 @@ double zF_Mthres_avg(void * params,
  ppr = params_local->ppr;
  pba = params_local->pba;
  pth = params_local->pth;
- S_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+ S_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*Transfer_f(pth->k_spike, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
  S_standard = integrate_simpson(ppr->k_min, pth->k_spike ,ppr->Number_k, LOG, integrand_for_S, params_local);
  S_tot = S_spike + S_standard;
  omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
- nu_minus = omega_of_z/sqrt(S_tot);
- nu_plus  = omega_of_z/sqrt(S_standard);
- N_frac_spike = erfc(nu_minus/sqrt(2.)) - erfc(nu_plus/sqrt(2.));
+ if (pth->consider_only_spike_UCMH == _TRUE_) {
+   nu_minus = omega_of_z/sqrt(S_spike);
+   nu_plus = 1.e10; //CHECK
+   N_frac_spike = erfc(nu_minus/sqrt(2.));
+ } else {
+   nu_minus = omega_of_z/sqrt(S_tot);
+   nu_plus  = omega_of_z/sqrt(S_standard);
+   N_frac_spike = erfc(nu_minus/sqrt(2.)) - erfc(nu_plus/sqrt(2.));
+ }
  z_avg = integrate_simpson(nu_minus, nu_plus,100000, LOG, integrand_for_zf_avg, params_local);
  z_avg = z_avg/N_frac_spike;
  if (N_frac_spike <1.e-100) { //to avoid divergences when N_frac_spike is tiny, substitute full expression of z_avg for approximate expression coming from a Taylor expansion (at nu_minus, nu_plus >> 1)
@@ -6581,9 +6651,30 @@ double integrand_for_zf_avg(void * params,
   pba = params_local->pba;
   z = params_local->z;
   fnu = sqrt(2./_PI_)*exp(-pow(nu,2)/2.);
-  integrand =(pow(nu*D_growth(z,pba),-1)-1.)*fnu;
+//  integrand =(pow(nu*D_growth(z,pba),-1)-1.)*fnu;
+  integrand =(pow(nu/(1.+z),-1)-1.)*fnu; //Here it is assumed that D(z) = 1./(1.+z) for simplicity
   return integrand;
 }
+
+double integrand_boost_spike(void * params,
+                             double zF) {
+  struct halos_workspace * params_local;
+  struct background * pba;
+  struct thermo * pth;
+  double nu,h_nu, c, integrand;
+  double S_spike, S_standard, S_tot;
+  double H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+  params_local = params;
+  pba = params_local->pba;
+  pth = params_local->pth;
+  S_spike =  (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*Transfer_f(pth->k_spike, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+  nu = _delta_crit_*(1.+zF)/sqrt(S_spike); //Here it is assumed that the growth factor is D(z)=1/(1+z)
+  h_nu = pow(2.*_PI_,-2)*pow(3.,-3./2.)*nu*exp(-nu*nu/2.)*f_BBKS(nu);
+  c = c_UCMH2(zF, params_local);
+  integrand = pow(1.+zF,-1)*h_nu*one_halo_boost_UCMH2(c, zF, params_local);
+  return integrand;
+}
+
 
 /* define function of concentration appearing for UCMH profiles */
 double one_halo_boost_UCMH(double c,
@@ -6592,31 +6683,28 @@ double one_halo_boost_UCMH(double c,
   struct halos_workspace * params_local;
   struct background * pba;
   struct thermo * pth;
-  double D, rho_max, rho_s;
-  double z, zF, Delta_t, rho_m_0;
+  double D, z, zF, Delta_t, rho_m_0;
   double mu_1, mu_2, rho_c_over_rho_m;
   double m_WIMP, sigmav_WIMP;
   params_local = params;
   pba = params_local->pba;
   pth = params_local->pth;
-  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
+  z = params_local->z;
   if (pth->M_at_Mthres == YES) {
     zF  = zF_Mthres_avg(params_local,z);
   } else {
     zF  = zF_w_spike(params_local, M);
   }
-  z = params_local->z;
-  rho_s = pth->f_2*rho_m_0*pow(1.+zF,3);
   if (z < zF) {
     Delta_t = MAX(tH0(z, pba)-tH0(zF, pba),tH0(zF, pba)/2.);
   } else {
     Delta_t = tH0(zF, pba)/2.;
   }
-  // following conversion is required, because previous formulas were assuming m_WIMP was in units of 100 GeV and sigmav in units of 3x10^{-26} cm^3/s
-  m_WIMP = pth->DM_mass/100.;
+  Delta_t *= pow(100.*pba->h*1.02e-3,-1.); //Note: 1km/s/Mpc = 1.02e-3 Gyr^-1
+  // following conversion is required, because following formulas assume m_WIMP in units of 1 TeV and sigmav in units of 3x10^{-26} cm^3/s
+  m_WIMP = pth->DM_mass/1000.;
   sigmav_WIMP = pth->annihilation_cross_section/3.0e-26;
-  rho_max = (2.836e26*pba->h)*m_WIMP/(sigmav_WIMP*Delta_t);
-  D = pow(rho_max/rho_s, 2./3.);
+  D = pow(6.72e-11,-1)*pow(1.+zF,-2)*pow((m_WIMP/sigmav_WIMP)*(30./pth->f_2)*(13.8/Delta_t),2./3.);
   class_test((pow(D,-1.)> c),
              pth->error_message,
              "D^{-1} =%e is bigger than c =%e ,this should never happen",1./D, c);
@@ -6625,6 +6713,38 @@ double one_halo_boost_UCMH(double c,
   rho_c_over_rho_m = 1. + pba->Omega0_lambda/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3.));
  return (pth->Delta_c*rho_c_over_rho_m/3.)*pow(c,3)*mu_2*pow(mu_1,-2);
 }
+
+
+/* define function of concentration appearing for UCMH profiles */
+double one_halo_boost_UCMH2(double c,
+                            double zF,
+                            void * params) {
+  struct halos_workspace * params_local;
+  struct background * pba;
+  struct thermo * pth;
+  double D, z, Delta_t;
+  double mmu_2, m_WIMP, sigmav_WIMP;
+  params_local = params;
+  pba = params_local->pba;
+  pth = params_local->pth;
+  z = params_local->z;
+//  Delta_t = MAX(tH0(z, pba)-tH0(zF, pba),tH0(zF, pba)/2.);
+// I checked that the full formula above gives essentially same results as approximate expression below
+  Delta_t = tH0(z, pba);
+  Delta_t *= pow(100.*pba->h*1.02e-3,-1.); //Note: 1km/s/Mpc = 1.02e-3 Gyr^-1
+  // following conversion is required, because following formulas assume m_WIMP in units of 1 TeV and sigmav in units of 3x10^{-26} cm^3/s
+  m_WIMP = pth->DM_mass/1000.;
+  sigmav_WIMP = pth->annihilation_cross_section/3.0e-26;
+  D = pow(6.72e-11,-1)*pow(1.+zF,-2)*pow((m_WIMP/sigmav_WIMP)*(30./pth->f_2)*(13.8/Delta_t),2./3.);
+  class_test((pow(D,-1.)> c),
+             pth->error_message,
+             "D^{-1} =%e is bigger than c =%e ,this should never happen",1./D, c);
+//  mmu_2 = (2./3.)+(2.*c+3.)/(pow(1.+c,2))+2.*log(c/(1.+c))-(2.*pow(D,-1)+3.)/(pow(1.+pow(D,-1),2))+2.*log(1.+D);
+// I checked that the full formula above (that takes into account full dependence with c) gives essentially same results as approximate expression below
+  mmu_2 = (2./3.)-3.+2.*log(D);
+ return 2.*_PI_*pow(17.,2)*pow(1.+zF,3)*mmu_2;
+}
+
 
 /* define cosmic time (multiplied by H0) in terms of z, for the LCDM model (radiation and curvature not taken into account) */
 double tH0(double z,
@@ -6661,12 +6781,42 @@ double halo_function_low_mass(void * params,
  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2); /* present matter density in units of M_sol/Mpc^3 */
  params_local->R = pow(M/(gamma*rho_m_0),1./3.);
  omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
- S_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*T_Hu(pth->k_spike, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
+ S_spike = (4./25.)*pth->A_spike*pow(pow(pth->k_spike,2.)*D_growth(0.,pba)*Transfer_f(pth->k_spike, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.);
  S_standard = integrate_simpson(ppr->k_min, 1./params_local->R ,ppr->Number_k, LOG, integrand_for_S,params_local);
  S_tot = S_spike + S_standard;
  nu = omega_of_z/sqrt(S_tot);
  fnu = sqrt(2./_PI_)*exp(-pow(nu,2)/2.);
  P_R_standard = pth->A_s*pow(cut_off,2)*pow(1./(pth->k_pivot*params_local->R),pth->n_s-1.);
- dS0_dM = (1./(3.*M))*(4./25.)*pow(pow(1./params_local->R,2.)*D_growth(0.,pba)*T_Hu(1./params_local->R, pba)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
+ dS0_dM = (1./(3.*M))*(4./25.)*pow(pow(1./params_local->R,2.)*D_growth(0.,pba)*Transfer_f(1./params_local->R, pba,pth)/((pba->Omega0_cdm+pba->Omega0_b)*pba->h*pba->h*pow(H100,2.)),2.)*P_R_standard;
  return (1./M)*(nu/(2.*S_tot))*fnu*dS0_dM;
+}
+
+
+/* function defined in eq. A.15 of J. M. Bardeen, J. R. Bond, N. Kaiser, and A. S. Szalay, Astrophys. J. 304, 15 (1986).*/
+double f_BBKS(double x) {
+return (pow(x,3)-3.*x)*(erf(sqrt(5./2.)*x)+erf(sqrt(5./2.)*x/2.))/2.
+        +sqrt(2./(5.*_PI_))*(((31.*x*x/4.)+(8./5.))*exp(-5.*x*x/8.)+ ((x*x/2.)-(8./5.))*exp(-5.*x*x/2.));
+}
+
+
+
+double Transfer_f(double k,
+                  struct background * pba,
+                  struct thermo * pth) {
+double kfs,Transfer,suppression;
+
+if (pth->add_baryons_UCMH == _TRUE_) {
+  Transfer = T_Hu(k, pba);
+} else {
+  Transfer = T_Hu_no_baryon(k, pba);
+}
+
+if (pth->add_suppression_kfs_UCMH == _TRUE_) {
+  suppression = pow((1.-(2./3.)*pow(k/pth->k_fs,2))*exp(-pow(k/pth->k_fs,2)),2); //eq 47 in arXiv:0503387
+} else {
+  suppression = 1.;
+}
+
+Transfer *= suppression;
+return Transfer;
 }

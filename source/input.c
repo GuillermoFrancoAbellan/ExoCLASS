@@ -1463,7 +1463,100 @@ int input_read_parameters(
 
     class_read_double("f_2",pth->f_2);
     class_read_double("Delta_c",pth->Delta_c);
-    class_read_double("Mass_min",pth->Mass_min);
+    class_read_double("k_fs",pth->k_fs);
+    class_test(pth->k_fs <1.e6,
+           errmsg,
+           "The value of free-streaming scale that you chose is suspiciously small");
+
+    class_call(parser_read_string(pfc,"UCMH_recipe",&string1,&flag1,errmsg),
+               errmsg,
+               errmsg);
+    if (flag1 == _TRUE_){
+      flag2 = _FALSE_;
+      /** - spherical accretion following Ali Haimoud and Kamionkowski 1612.05644 */
+      if (strcmp(string1,"GG") == 0) {
+        pth->UCMH_recipe = GG;
+        flag2=_TRUE_;
+      }
+      /** - disk accretion following Poulin et al. 1707.04206 */
+      if (strcmp(string1,"Delos") == 0) {
+        pth->UCMH_recipe = Delos;
+        flag2=_TRUE_;
+      }
+
+    class_test(flag2==_FALSE_,
+                 errmsg,
+                 "could not identify UCMH_recipe, check that it is one of 'GG' or 'Delos'.");
+    }
+    else{
+      class_stop(errmsg,"you have 'has_UCMH_spike == _TRUE_' but you forgot to give an 'UCMH_recipe'. Please choose between 'GG' and 'Delos'. ")
+    }
+
+    class_call(parser_read_string(pfc,"add_baryons_UCMH",&(string1),&(flag1),errmsg),errmsg,errmsg);
+    if (flag1 == _TRUE_) {
+    if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+      pth->add_baryons_UCMH = _TRUE_;
+    }
+    else {
+      if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+        pth->add_baryons_UCMH = _FALSE_;
+      }
+      else {
+        class_stop(errmsg,"incomprehensible input '%s' for the field 'add_baryons_UCMH'",string1);
+      }
+     }
+    }
+
+    class_call(parser_read_string(pfc,"add_suppression_kfs_UCMH",&(string1),&(flag1),errmsg),errmsg,errmsg);
+    if (flag1 == _TRUE_) {
+    if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+      pth->add_suppression_kfs_UCMH = _TRUE_;
+    }
+    else {
+      if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+        pth->add_suppression_kfs_UCMH = _FALSE_;
+      }
+      else {
+        class_stop(errmsg,"incomprehensible input '%s' for the field 'add_baryons_UCMH'",string1);
+      }
+     }
+    }
+
+
+    if (pth->UCMH_recipe == GG) {
+
+      class_call(parser_read_string(pfc,"consider_only_spike_UCMH",&(string1),&(flag1),errmsg),errmsg,errmsg);
+      if (flag1 == _TRUE_) {
+      if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+        pth->consider_only_spike_UCMH = _TRUE_;
+      }
+      else {
+        if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+          pth->consider_only_spike_UCMH = _FALSE_;
+        }
+        else {
+          class_stop(errmsg,"incomprehensible input '%s' for the field 'consider_only_spike_UCMH'",string1);
+        }
+       }
+      }
+      class_call(parser_read_string(pfc,"consider_zF_avg_UCMH",&(string1),&(flag1),errmsg),errmsg,errmsg);
+      if (flag1 == _TRUE_) {
+      if ((strstr(string1,"y") != NULL) || (strstr(string1,"Y") != NULL)) {
+        pth->consider_zF_avg_UCMH = _TRUE_;
+      }
+      else {
+        if ((strstr(string1,"n") != NULL) || (strstr(string1,"N") != NULL)) {
+          pth->consider_zF_avg_UCMH = _FALSE_;
+        }
+        else {
+          class_stop(errmsg,"incomprehensible input '%s' for the field 'consider_zF_avg_UCMH'",string1);
+        }
+       }
+      }
+
+    }
+
+
   }
 
   //GFA, do we want to consider an extended PBH mass function ?
@@ -1796,7 +1889,7 @@ if (_FALSE_) {
   }
 
   if(pth->has_on_the_spot == _TRUE_ && pth->has_UCMH_spike == _TRUE_){
-    fprintf(stdout,"You cannot work in the 'on the spot' approximation with UCMHs. Condition 'has_on_the_spot' will be set to 'no' automatically.\n");
+  //  fprintf(stdout,"You cannot work in the 'on the spot' approximation with UCMHs. Condition 'has_on_the_spot' will be set to 'no' automatically.\n");
     pth->has_on_the_spot = _FALSE_; // GFA
   }
 
@@ -3939,11 +4032,17 @@ int input_default_params(
   pth->log10_Mcut_PBH = 2;
   pth->num_PBH_accreting_mass = 10;
   pth->has_UCMH_spike = _FALSE_; // GFA
+  pth->add_baryons_UCMH = _FALSE_; // GFA
+  pth->add_suppression_kfs_UCMH = _TRUE_; // GFA
+  pth->consider_only_spike_UCMH = _FALSE_; // GFA
+  pth->consider_zF_avg_UCMH = _TRUE_; // GFA
+  pth->UCMH_recipe = GG; // GFA
   pth->M_at_Mthres = NO; // GFA
   pth->A_spike = 1.e-10;
   pth->k_spike =1.e3;
   pth->f_2 = 30.;
   pth->Delta_c = 200.;
+  pth->k_fs = 1.0e7;
   pth->Mass_min = 1.0e-6;
   pth->DM_mass = 0;
   pth->decay_fraction = 0.;
