@@ -70,6 +70,12 @@ enum UCMH_recipe {
   Delos  /**< à la Delos et al. 1806.07389 */
 };
 
+
+enum UCMH_DM_ann_type {
+  s_wave, /**< s-wave annihilation */
+  p_wave  /**< p-wave annihilation */
+};
+
 enum energy_deposition_function {
   No_deposition, /**< No energy deposition is considered. Useful for pedagogic illustration. */
   Analytical_approximation, /**< Analytical energy deposition treatment, introduced in 1209.0247 and corrected in 1612.05644 */
@@ -303,6 +309,7 @@ double * reio_inter_xe; /**< discrete \f$ X_e(z)\f$ values */
 
   short has_UCMH_spike; /**< flag to specify if we want to consider a spike in the primordial spectrum, leading to the formation of  UCMHs**/
   enum UCMH_recipe UCMH_recipe; /**< recipe to compute boost factor from mini-halos */
+  enum UCMH_DM_ann_type UCMH_DM_ann_type; /**< DM annihilation type for UCMH boost calculation */
   short add_baryons_UCMH; /**< flag to specify if we want to consider baryons in the transfer functions for the calculation of the UCMH boost **/
   short add_suppression_kfs_UCMH; /**< flag to specify if we want to consider free-streaming suppression in the transfer functions for the calculation of the UCMH boost **/
   short consider_only_spike_UCMH; /**< flag to specify if we want to consider only the spike contribution for the calculation of the UCMH boost (in the GG method) **/
@@ -1026,6 +1033,7 @@ double integrand_boost_high_mass(void * params,
                                  double M);
 
 double one_halo_boost_NFW(double c,
+                          double M,
                           void * params);
 
 double c_NFW(double M,
@@ -1089,6 +1097,11 @@ double f_BBKS(double x);
 double Transfer_f(double k,
                   struct background * pba,
                   struct thermo * pth);
+
+double li2(double x);
+static double li3_neg(double x);
+static double li3_pos(double x);
+double li3(double x);
 
 #ifdef __cplusplus
 }

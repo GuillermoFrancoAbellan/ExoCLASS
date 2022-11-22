@@ -77,8 +77,8 @@ double rec_TLA_dxHIIdlna(double z, double xe, double xHII, double nH, double H, 
 
 /*** Effective rate tables and associated parameters ***/
 
-#define ALPHA_FILE  "HyRec_2017/data/Alpha_inf.dat"     /* Effective recombination coefficients to 2s and 2p */
-#define RR_FILE     "HyRec_2017/data/R_inf.dat"         /* Effective transfer rate R_{2p,2s} */
+#define ALPHA_FILE   "HyRec_2017/data/Alpha_inf.dat"    /* Effective recombination coefficients to 2s and 2p */
+#define RR_FILE      "HyRec_2017/data/R_inf.dat"         /* Effective transfer rate R_{2p,2s} */
 #define TR_MIN 0.004                         /* Minimum Tr in eV */
 #define TR_MAX 0.4                           /* Maximum Tr in eV */
 #define NTR    100                           /* Number of Tr values */
@@ -88,7 +88,7 @@ double rec_TLA_dxHIIdlna(double z, double xe, double xHII, double nH, double H, 
 
 /*** Tables and parameters for radiative transfer calculation ***/
 
-#define TWOG_FILE "HyRec_2017/data/two_photon_tables.dat"
+#define TWOG_FILE   "HyRec_2017/data/two_photon_tables.dat"
 #define NSUBLYA  140
 #define NSUBLYB  271
 #define NVIRT    311
@@ -160,10 +160,16 @@ void solve_real_virt(double xr[2], double xv[NVIRT], double Trr[2][2], double *T
 double interp_Dfnu(double x0, double dx, double *ytab, unsigned int Nx, double x);
 void fplus_from_fminus(double fplus[NVIRT], double fplus_Ly[], double **Dfminus_hist, double **Dfminus_Ly_hist,
                        double TR, double zstart, unsigned iz, double z, double Eb_tab[NVIRT]);
-double rec_HMLA_2photon_dxedlna(double xe, double nH, double H, double TM, double TR,
-                                HYREC_ATOMIC *atomic,REC_COSMOPARAMS *params,
-                                double **Dfminus_hist, double **Dfminus_Ly_hist, double **Dfnu_hist,
-                                double zstart, unsigned iz, double z, double fsR, double meR, double dE_dtdV, int *error);
+//double rec_HMLA_2photon_dxedlna(double xe, double nH, double H, double TM, double TR,
+//                                HYREC_ATOMIC *atomic,REC_COSMOPARAMS *params,
+//                                double **Dfminus_hist, double **Dfminus_Ly_hist, double **Dfnu_hist,
+//                                double zstart, unsigned iz, double z, double fsR, double meR, double dE_dtdV, int *error);
+
+double rec_HMLA_2photon_dxHIIdlna(double xe, double xHII, double nH, double H, double TM, double TR,
+																 HYREC_ATOMIC *atomic,REC_COSMOPARAMS *params,
+																 double **Dfminus_hist, double **Dfminus_Ly_hist, double **Dfnu_hist,
+																 double zstart, unsigned iz, double z, double fsR, double meR, double dE_dtdV, int *error);
+
 double rec_dxHIIdlna(int model, double xe, double xHII, double nH, double H, double TM, double TR,
                      HYREC_ATOMIC *atomic, RADIATION *rad, unsigned iz, double z,
 		     double fsR, double meR, double dEdtdV, int *error, REC_COSMOPARAMS *params);

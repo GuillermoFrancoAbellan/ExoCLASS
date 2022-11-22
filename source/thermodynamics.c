@@ -400,10 +400,11 @@ int thermodynamics_init(
 	     pth->error_message,
 	     "annihilation parameter cannot be negative");
 
-  class_test((pth->annihilation>1.e-4),
-	     pth->error_message,
-	     "annihilation parameter suspiciously large (%e, while typical bounds are in the range of 1e-7 to 1e-6)",
-	     pth->annihilation);
+// GFA: I commented out this error, to deal with p-wave DM annihilations in early mini-halos
+//  class_test((pth->annihilation>1.e-4),
+//	     pth->error_message,
+//	     "annihilation parameter suspiciously large (%e, while typical bounds are in the range of 1e-7 to 1e-6)",
+//	     pth->annihilation);
 
   class_test(pth->PBH_evaporating_mass > 0 && pth->PBH_evaporating_mass < 1e15 && pth->PBH_fraction > 1e-4,pth->error_message,
 	     "The value of 'pth->PBH_fraction' that you enter is suspicious given the mass you chose. You are several orders of magnitude above the limit. The code doesn't handle well too high energy injection. Please choose  'pth->PBH_fraction < 1e-4'. ")
@@ -6248,7 +6249,7 @@ int compute_boost_NFW_UCMH(
  double z_step, z;
  int index_z;
  int index_M;
- double rho_m_0,rho_m_eq, H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
+ double rho_m_0, H100=1./3000.; /* #To express Hubble constant in units of 100 Mpc^{-1} (having set c=1) */
  double nu_minus,nu_plus,omega_of_z, N_frac_spike, c_spike, rho_c_over_rho_m;
  double S_standard=0., S_spike=0., S_tot=0.;
  double boost_low_mass, boost_high_mass, boost_spike;
@@ -6260,7 +6261,6 @@ int compute_boost_NFW_UCMH(
  params.pth = pth;
 
  rho_m_0 = (pba->Omega0_cdm+pba->Omega0_b)*2.775e11*pow(pba->h,2);  /* present matter density in units of M_sol/Mpc^3 */
- rho_m_eq = rho_m_0*pow(1.+pba->z_eq,3);  /* matter density at equality in units of M_sol/Mpc^3 */
  Mass_thres = gamma*pow(pth->k_spike,-3)*rho_m_0;
  pth->Mass_min = gamma*pow(pth->k_fs,-3)*rho_m_0; //We always fix a minimal mass different from zero, even when we don't consider a free-streaming suppression in the transfer function
  if (pth->add_suppression_kfs_UCMH == _TRUE_) {
@@ -6296,36 +6296,41 @@ int compute_boost_NFW_UCMH(
       boost_spike=0.;
     }
     pth->boost_table[index_z] = 1.+boost_spike;
+
   } else if (pth->UCMH_recipe == GG) {
-    //Compute high-mass contribution
-    boost_high_mass  = integrate_simpson(Mass_thres, ppr->Mass_max ,ppr->Number_M, LOG, integrand_boost_high_mass,&params);
-    //Compute low-mass contribution
-    boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
-    // compute spike contribution
-    if (pth->consider_zF_avg_UCMH == _TRUE_) {
-      pth->M_at_Mthres = YES;  //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
-    }
-    omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
-    if (pth->consider_only_spike_UCMH == _TRUE_) {
-      nu_minus = omega_of_z/sqrt(S_spike);
-      N_frac_spike = erfc(nu_minus/sqrt(2.));
-    } else {
+
+    if (pth->consider_only_spike_UCMH == _FALSE_) {
+      //Compute high-mass contribution
+      boost_high_mass  = integrate_simpson(Mass_thres, ppr->Mass_max ,ppr->Number_M, LOG, integrand_boost_high_mass,&params);
+      //Compute low-mass contribution
+      boost_low_mass = integrate_simpson(pth->Mass_min, Mass_thres ,ppr->Number_M, LOG, integrand_boost_low_mass,&params);
+      // Compute spike contribution
+      if (pth->consider_zF_avg_UCMH == _TRUE_) { pth->M_at_Mthres = YES; }  //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
+      omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
       nu_minus = omega_of_z/sqrt(S_tot);
       nu_plus  = omega_of_z/sqrt(S_standard);
       N_frac_spike = erf(nu_plus/sqrt(2.)) - erf(nu_minus/sqrt(2.));
-    }
-    c_spike  = c_UCMH(Mass_thres, &params);
-    boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
-    if (pth->consider_zF_avg_UCMH == _TRUE_) {
-      pth->M_at_Mthres = NO;
-    }
-    // add up the three contributions
-    if (pth->consider_only_spike_UCMH == _TRUE_) {
-      pth->boost_table[index_z] = 1.+boost_spike;
-    } else {
+      c_spike  = c_UCMH(Mass_thres, &params);
+      boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
+      if (pth->consider_zF_avg_UCMH == _TRUE_) {pth->M_at_Mthres = NO;}
+      // add up three contribution
       pth->boost_table[index_z] = 1.+boost_spike+boost_low_mass+boost_high_mass;
+      if (pth->UCMH_DM_ann_type == p_wave) {pth->boost_table[index_z] -= 1.;} //This is done because for p-wave annihilations we neglect the contribution from the smooth background (which is extremely small)
+
+    } else {
+      // Compute only spike contribution
+      if (pth->consider_zF_avg_UCMH == _TRUE_) { pth->M_at_Mthres = YES;}  //this is used to tell when to compute the average redshift at M = Mass_thres (i.e. at the spike)
+      omega_of_z = _delta_crit_*D_growth(0.,pba)/D_growth(z,pba);
+      nu_minus = omega_of_z/sqrt(S_spike);
+      N_frac_spike = erfc(nu_minus/sqrt(2.));
+      c_spike  = c_UCMH(Mass_thres, &params);
+      boost_spike = N_frac_spike*one_halo_boost_UCMH(c_spike, Mass_thres, &params);
+      if (pth->consider_zF_avg_UCMH == _TRUE_) {pth->M_at_Mthres = NO;}
+      pth->boost_table[index_z] = 1.+boost_spike;
+      if (pth->UCMH_DM_ann_type == p_wave) {pth->boost_table[index_z] -= 1.;} //This is done because for p-wave annihilations we neglect the contribution from the smooth background (which is extremely small)
     }
   }
+
  }
 
  return _SUCCESS_;
@@ -6422,25 +6427,38 @@ double integrand_boost_high_mass(void * params,
   double c, integrand;
   params_local = params;
   c = c_NFW(M, params_local);
-  integrand = M*halo_function_high_mass(params_local, M)*one_halo_boost_NFW(c,params_local);
+  integrand = M*halo_function_high_mass(params_local, M)*one_halo_boost_NFW(c, M, params_local);
   return integrand;
 }
 
 /* define function of concentration appearing for NFW profiles */
 double one_halo_boost_NFW(double c,
+                          double M,
                           void * params) {
   struct halos_workspace * params_local;
   struct background * pba;
   struct thermo * pth;
   double mu_1, mu_2, z, rho_c_over_rho_m;
+  double one_halo_boost,factor_p_wave, F_of_c;
   params_local = params;
   pba = params_local->pba;
   pth = params_local->pth;
   z = params_local->z;
   mu_1 = log(1.+c)-c*pow(1.+c,-1);
-  mu_2 = (1./3.)*(1.-pow(1.+c,-3));
   rho_c_over_rho_m = 1. + pba->Omega0_lambda/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3.));
- return (pth->Delta_c*rho_c_over_rho_m/3.)*pow(c,3)*mu_2*pow(mu_1,-2);
+  if (pth->UCMH_DM_ann_type == s_wave) {
+    mu_2 = (1./3.)*(1.-pow(1.+c,-3));
+    one_halo_boost = (pth->Delta_c*rho_c_over_rho_m/3.)*pow(c,3)*mu_2*pow(mu_1,-2);
+  } else {
+    factor_p_wave = pow(_G_*H_per_H0(z,pba)*pba->h*1.e2*_km_over_Mpc_*M*_Sun_mass_over_kg_/pow(_c_,3),2./3.);
+    factor_p_wave *= 4.*_PI_*pow(4.*pow(pth->Delta_c,4.),1./3.)*rho_c_over_rho_m;
+    factor_p_wave *= pow(c,4.)/pow(mu_1,3.);
+    F_of_c = -li2(-c)-6.*li3(1./(1.+c))-6.*log(1.+c)*li2(1./(1.+c))+6.*_zeta3_-(53./6.)
+    +pow(log(1.+c),2)*(3.*log(c/(1.+c))+((2.+3.*c)/(c*(1.+c)))-0.5*(1.+pow(c,-2.)))
+    +log(1.+c)*(pow(1.+c,-2.)+((1.+7.*c)/(c*(1.+c))))+pow(1.+c,-1)*(7.+pow(1.+c,-1)+(1./3.)*pow(1.+c,-2));
+    one_halo_boost = factor_p_wave*F_of_c; // CHECK
+  }
+ return one_halo_boost;
 }
 
 /* define concentration function using prescription à la Macciò et al. (arXiv:0805.1926)*/
@@ -6460,7 +6478,7 @@ return k_200*pow(H_per_H0(zF,pba)/H_per_H0(z,pba),2./3.);
 /* define Hubble parameter (divided by its present value H0) in terms of z, for the LCDM model  */
 double H_per_H0(double z,
                 struct background * pba) {
-return sqrt(pba->Omega0_lambda+(pba->Omega0_cdm+pba->Omega0_b)*pow(1.0+z,3)+(pba->Omega0_g+pba->Omega0_ur)*pow(1.0+z,4));
+return sqrt(pba->Omega0_lambda+(pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3)+(pba->Omega0_g+pba->Omega0_ur)*pow(1.+z,4));
 }
 
 /* computes the effective redshift for the formation of a halo of mass M  */
@@ -6685,7 +6703,8 @@ double one_halo_boost_UCMH(double c,
   struct thermo * pth;
   double D, z, zF, Delta_t, rho_m_0;
   double mu_1, mu_2, rho_c_over_rho_m;
-  double m_WIMP, sigmav_WIMP;
+  double m_WIMP, sigmav_WIMP, one_halo_boost;
+  double factor_p_wave, F_of_c;
   params_local = params;
   pba = params_local->pba;
   pth = params_local->pth;
@@ -6709,9 +6728,25 @@ double one_halo_boost_UCMH(double c,
              pth->error_message,
              "D^{-1} =%e is bigger than c =%e ,this should never happen",1./D, c);
   mu_1 = 2.*asinh(sqrt(c))-2.*sqrt(c/(1.+c));
-  mu_2 = (1./3.)+(2.*c+3.)/(2.*pow(1.+c,2))+log(c/(1.+c))-(2.*pow(D,-1)+3.)/(2.*pow(1.+pow(D,-1),2))+log(1.+D);
   rho_c_over_rho_m = 1. + pba->Omega0_lambda/((pba->Omega0_cdm+pba->Omega0_b)*pow(1.+z,3.));
- return (pth->Delta_c*rho_c_over_rho_m/3.)*pow(c,3)*mu_2*pow(mu_1,-2);
+
+  if (pth->UCMH_DM_ann_type == s_wave) {
+    mu_2 = (1./3.)+(2.*c+3.)/(2.*pow(1.+c,2))+log(c/(1.+c))-(2.*pow(D,-1)+3.)/(2.*pow(1.+pow(D,-1),2))+log(1.+D);
+    one_halo_boost = (pth->Delta_c*rho_c_over_rho_m/3.)*pow(c,3)*mu_2*pow(mu_1,-2);
+  } else {
+    factor_p_wave = pow(_G_*H_per_H0(z,pba)*pba->h*1.e2*_km_over_Mpc_*M*_Sun_mass_over_kg_/pow(_c_,3),2./3.);
+    factor_p_wave *= 4.*_PI_*pow(4.*pow(pth->Delta_c,4.),1./3.)*rho_c_over_rho_m;
+    factor_p_wave *= pow(c,4.)/pow(mu_1,3.);
+    F_of_c = -(8./15.)*pow(c,-5./2.)*pow(1.+c,-3./2.)
+    *(-c*(-3.+c*(9.+c*(87.+70.*c)))+7.*pow(_PI_,2.)*(sqrt(pow(c,5.)*(1.+c))+sqrt(pow(c,7.)*(1.+c)))
+    +3.*asinh(sqrt(c))*(-2.*sqrt(c*(1.+c))+5.*sqrt(pow(c,3.)*(1.+c))+12.*sqrt(pow(c,5.)*(1.+c))
+    +(1.-16.*sqrt(pow(c,5.)*(1.+c))-16.*sqrt(pow(c,7.)*(1.+c))+c*(1.+2.*c)*(-1.+8.*c*(1.+c)))*asinh(sqrt(c))
+    +8.*pow(c,5./2.)*pow(1.+c,3./2.)*(log(1.-exp(-2.*asinh(sqrt(c))))-5.*log(1.+exp(-2.*asinh(sqrt(c))))))
+    +6.*(sqrt(pow(c,5.)*(1.+c))+sqrt(pow(c,7.)*(1.+c)))*(5.*li2(exp(-4.*asinh(sqrt(c)))) -12.*li2(exp(-2.*asinh(sqrt(c))))));
+    one_halo_boost = factor_p_wave*F_of_c; //CHECK
+  }
+
+ return one_halo_boost;
 }
 
 
@@ -6819,4 +6854,164 @@ if (pth->add_suppression_kfs_UCMH == _TRUE_) {
 
 Transfer *= suppression;
 return Transfer;
+}
+
+
+double li2(double x) {
+
+   const double PI = 3.1415926535897932;
+   const double P[] = {
+      0.9999999999999999502e+0,
+     -2.6883926818565423430e+0,
+      2.6477222699473109692e+0,
+     -1.1538559607887416355e+0,
+      2.0886077795020607837e-1,
+     -1.0859777134152463084e-2
+   };
+   const double Q[] = {
+      1.0000000000000000000e+0,
+     -2.9383926818565635485e+0,
+      3.2712093293018635389e+0,
+     -1.7076702173954289421e+0,
+      4.1596017228400603836e-1,
+     -3.9801343754084482956e-2,
+      8.2743668974466659035e-4
+   };
+
+   double y = 0, r = 0, s = 1;
+
+   /* transform to [0, 1/2] */
+   if (x < -1) {
+      const double l = log(1 - x);
+      y = 1/(1 - x);
+      r = -PI*PI/6 + l*(0.5*l - log(-x));
+      s = 1;
+   } else if (x == -1) {
+      return -PI*PI/12;
+   } else if (x < 0) {
+      const double l = log1p(-x);
+      y = x/(x - 1);
+      r = -0.5*l*l;
+      s = -1;
+   } else if (x == 0) {
+      return 0;
+   } else if (x < 0.5) {
+      y = x;
+      r = 0;
+      s = 1;
+   } else if (x < 1) {
+      y = 1 - x;
+      r = PI*PI/6 - log(x)*log(y);
+      s = -1;
+   } else if (x == 1) {
+      return PI*PI/6;
+   } else if (x < 2) {
+      const double l = log(x);
+      y = 1 - 1/x;
+      r = PI*PI/6 - l*(log(y) + 0.5*l);
+      s = 1;
+   } else {
+      const double l = log(x);
+      y = 1/x;
+      r = PI*PI/3 - 0.5*l*l;
+      s = -1;
+   }
+
+   const double y2 = y*y;
+   const double y4 = y2*y2;
+   const double p = P[0] + y * P[1] + y2 * (P[2] + y * P[3]) +
+                    y4 * (P[4] + y * P[5]);
+   const double q = Q[0] + y * Q[1] + y2 * (Q[2] + y * Q[3]) +
+                    y4 * (Q[4] + y * Q[5] + y2 * Q[6]);
+
+   return r + s*y*p/q;
+}
+
+/// Li_3(x) for x in [-1,0]
+static double li3_neg(double x) {
+   const double cp[] = {
+      0.9999999999999999795e+0, -2.0281801754117129576e+0,
+      1.4364029887561718540e+0, -4.2240680435713030268e-1,
+      4.7296746450884096877e-2, -1.3453536579918419568e-3
+   };
+   const double cq[] = {
+      1.0000000000000000000e+0, -2.1531801754117049035e+0,
+      1.6685134736461140517e+0, -5.6684857464584544310e-1,
+      8.1999463370623961084e-2, -4.0756048502924149389e-3,
+      3.4316398489103212699e-5
+   };
+
+   const double x2 = x*x;
+   const double x4 = x2*x2;
+   const double p = cp[0] + x*cp[1] + x2*(cp[2] + x*cp[3]) +
+      x4*(cp[4] + x*cp[5]);
+   const double q = cq[0] + x*cq[1] + x2*(cq[2] + x*cq[3]) +
+      x4*(cq[4] + x*cq[5] + x2*cq[6]);
+
+   return x*p/q;
+}
+
+
+/// Li_3(x) for x in [0,1/2]
+static double li3_pos(double x) {
+   const double cp[] = {
+      0.9999999999999999893e+0, -2.5224717303769789628e+0,
+      2.3204919140887894133e+0, -9.3980973288965037869e-1,
+      1.5728950200990509052e-1, -7.5485193983677071129e-3
+   };
+   const double cq[] = {
+      1.0000000000000000000e+0, -2.6474717303769836244e+0,
+      2.6143888433492184741e+0, -1.1841788297857667038e+0,
+      2.4184938524793651120e-1, -1.8220900115898156346e-2,
+      2.4927971540017376759e-4
+   };
+
+   const double x2 = x*x;
+   const double x4 = x2*x2;
+   const double p = cp[0] + x*cp[1] + x2*(cp[2] + x*cp[3]) +
+      x4*(cp[4] + x*cp[5]);
+   const double q = cq[0] + x*cq[1] + x2*(cq[2] + x*cq[3]) +
+      x4*(cq[4] + x*cq[5] + x2*cq[6]);
+
+   return x*p/q;
+}
+
+/**
+ * @brief Real trilogarithm \f$\operatorname{Li}_3(x)\f$
+ * @param x real argument
+ * @return \f$\operatorname{Li}_3(x)\f$
+ * @author Alexander Voigt
+ */
+double li3(double x) {
+   const double zeta2 = 1.6449340668482264;
+   const double zeta3 = 1.2020569031595943;
+
+   // transformation to [-1,0] and [0,1/2]
+   if (x < -1) {
+      const double l = log(-x);
+      return li3_neg(1/x) - l*(zeta2 + 1.0/6*l*l);
+   } else if (x == -1) {
+      return -0.75*zeta3;
+   } else if (x < 0) {
+      return li3_neg(x);
+   } else if (x == 0) {
+      return 0;
+   } else if (x < 0.5) {
+      return li3_pos(x);
+   } else if (x == 0.5) {
+      return 0.53721319360804020;
+   } else if (x < 1) {
+      const double l = log(x);
+      return -li3_neg(1 - 1/x) - li3_pos(1 - x)
+         + zeta3 + l*(zeta2 + l*(-0.5*log(1 - x) + 1.0/6*l));
+   } else if (x == 1) {
+      return zeta3;
+   } else if (x < 2) {
+      const double l = log(x);
+      return -li3_neg(1 - x) - li3_pos(1 - 1/x)
+         + zeta3 + l*(zeta2 + l*(-0.5*log(x - 1) + 1.0/6*l));
+   } else { // x >= 2.0
+      const double l = log(x);
+      return li3_pos(1/x) + l*(2*zeta2 - 1.0/6*l*l);
+   }
 }
