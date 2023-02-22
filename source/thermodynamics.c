@@ -6847,7 +6847,7 @@ if (pth->add_baryons_UCMH == _TRUE_) {
 }
 
 if (pth->add_suppression_kfs_UCMH == _TRUE_) {
-  suppression = pow((1.-(2./3.)*pow(k/pth->k_fs,2))*exp(-pow(k/pth->k_fs,2)),2); //eq 47 in arXiv:0503387
+  suppression = (1.-(2./3.)*pow(k/pth->k_fs,2))*exp(-pow(k/pth->k_fs,2)); //eq 47 in arXiv:0503387
 } else {
   suppression = 1.;
 }

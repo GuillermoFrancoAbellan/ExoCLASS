@@ -1,7 +1,7 @@
 README
 autosetup.py
 setup.py
-/Users/gfranco/ExoCLASS/python/../python/classy.pyx
+/Users/gfranco/class_repositories/ExoCLASS/python/../python/classy.pyx
 classy.egg-info/PKG-INFO
 classy.egg-info/SOURCES.txt
 classy.egg-info/dependency_links.txt
